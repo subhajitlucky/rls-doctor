@@ -114,6 +114,12 @@ Install the skill from GitHub with:
 npx skills add subhajitlucky/rls-doctor
 ```
 
+Use the skill once without installing:
+
+```bash
+npx skills use subhajitlucky/rls-doctor --skill rls-doctor
+```
+
 Optional discovery only:
 
 ```bash
