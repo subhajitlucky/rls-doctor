@@ -1,0 +1,49 @@
+{
+  "name": "rls-doctor",
+  "version": "0.1.0",
+  "description": "A CLI auditor for Postgres and Supabase Row Level Security posture.",
+  "type": "module",
+  "bin": {
+    "rls-doctor": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsx src/cli.ts",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "postgres",
+    "supabase",
+    "rls",
+    "security",
+    "cli",
+    "audit"
+  ],
+  "author": "Subhajit Pradhan",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
