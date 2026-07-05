@@ -1,6 +1,6 @@
 {
   "name": "rls-doctor",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A CLI auditor for Postgres and Supabase Row Level Security posture.",
   "type": "module",
   "bin": {
@@ -16,10 +16,11 @@
   "scripts": {
     "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean",
     "check": "tsc --noEmit",
-    "ci": "npm run check && npm test && npm run build && npm audit --audit-level=low",
+    "ci": "npm run check && npm test && npm run build && npm run test:cli-version && npm audit --audit-level=low",
     "ci:full": "npm run ci && npm run test:integration",
     "demo": "node scripts/print-demo.js",
     "test": "vitest run",
+    "test:cli-version": "node scripts/check-cli-version.js",
     "test:integration": "npm run build && node scripts/run-integration-docker.js",
     "test:integration:db": "npm run build && node scripts/run-integration.js",
     "dev": "tsx src/cli.ts",

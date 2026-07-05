@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Command } from "commander";
 import { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
 import type { Severity } from "./audit/types.js";
@@ -7,11 +8,13 @@ import { renderJsonReport } from "./reporters/json.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 
 const program = new Command();
+const require = createRequire(import.meta.url);
+const packageJson = require("../package.json") as { version: string };
 
 program
   .name("rls-doctor")
   .description("Audit Postgres and Supabase Row Level Security posture from the command line.")
-  .version("0.1.0");
+  .version(packageJson.version);
 
 program
   .command("check")
