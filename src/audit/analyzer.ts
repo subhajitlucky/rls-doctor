@@ -68,7 +68,11 @@ function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudi
       table: table.name,
       title: "Row Level Security is disabled",
       detail: `${qualifiedName(table)} can be read or changed according to table privileges without row-level policy checks.`,
-      recommendation: "Enable RLS and add least-privilege policies for each application role."
+      recommendation: "Enable RLS and add least-privilege policies for each application role.",
+      suggestedSql: [
+        `alter table ${quoteQualifiedName(table)} enable row level security;`,
+        `-- Then add policies that match your access model before exposing this table to client roles.`
+      ]
     });
 
     return tableAudit(table, policies, findings);
@@ -82,7 +86,14 @@ function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudi
       table: table.name,
       title: "RLS is enabled but no policies exist",
       detail: `${qualifiedName(table)} will default-deny access for non-owner roles, which may break application reads or writes.`,
-      recommendation: "Add explicit policies for the roles and commands the application needs."
+      recommendation: "Add explicit policies for the roles and commands the application needs.",
+      suggestedSql: [
+        `create policy "users can read own ${table.name}"`,
+        `  on ${quoteQualifiedName(table)}`,
+        `  for select`,
+        `  to authenticated`,
+        `  using ((select auth.uid()) = owner_id);`
+      ]
     });
   }
 
@@ -94,7 +105,8 @@ function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudi
       table: table.name,
       title: "FORCE ROW LEVEL SECURITY is disabled",
       detail: "Table owners and privileged sessions can bypass RLS unless FORCE RLS is enabled.",
-      recommendation: "Enable FORCE RLS for sensitive multi-tenant tables after confirming owner-side maintenance workflows."
+      recommendation: "Enable FORCE RLS for sensitive multi-tenant tables after confirming owner-side maintenance workflows.",
+      suggestedSql: [`alter table ${quoteQualifiedName(table)} force row level security;`]
     });
   }
 
@@ -119,7 +131,13 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
       table: table.name,
       title: "Anonymous-style role can read rows unconditionally",
       detail: `Policy "${policy.name}" grants ${policy.command} to ${policy.roles.join(", ")} with no row predicate.`,
-      recommendation: "Restrict the policy with tenant, owner, or explicit public-content predicates."
+      recommendation: "Restrict the policy with tenant, owner, or explicit public-content predicates.",
+      suggestedSql: [
+        `-- Replace broad read access with an explicit public-content predicate.`,
+        `alter policy ${quoteIdentifier(policy.name)}`,
+        `  on ${quoteQualifiedName(table)}`,
+        `  using (is_public = true);`
+      ]
     });
   }
 
@@ -131,7 +149,15 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
       table: table.name,
       title: "Anonymous-style role can write rows too broadly",
       detail: `Policy "${policy.name}" allows ${policy.command} for ${policy.roles.join(", ")} with an unconditional predicate.`,
-      recommendation: "Require authenticated ownership checks and explicit WITH CHECK constraints for writes."
+      recommendation: "Require authenticated ownership checks and explicit WITH CHECK constraints for writes.",
+      suggestedSql: [
+        `-- Prefer authenticated ownership checks for writes.`,
+        `alter policy ${quoteIdentifier(policy.name)}`,
+        `  on ${quoteQualifiedName(table)}`,
+        `  to authenticated`,
+        `  using ((select auth.uid()) = owner_id)`,
+        `  with check ((select auth.uid()) = owner_id);`
+      ]
     });
   }
 
@@ -143,7 +169,12 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
       table: table.name,
       title: "Write policy has no explicit WITH CHECK expression",
       detail: `Policy "${policy.name}" handles ${policy.command} without an explicit insert/update constraint.`,
-      recommendation: "Add WITH CHECK so new or changed rows must satisfy the same ownership and tenant boundaries."
+      recommendation: "Add WITH CHECK so new or changed rows must satisfy the same ownership and tenant boundaries.",
+      suggestedSql: [
+        `alter policy ${quoteIdentifier(policy.name)}`,
+        `  on ${quoteQualifiedName(table)}`,
+        `  with check ((select auth.uid()) = owner_id);`
+      ]
     });
   }
 
@@ -228,4 +259,12 @@ function tableKey(schema: string, table: string): string {
 
 function qualifiedName(table: TableSnapshot): string {
   return `${table.schema}.${table.name}`;
+}
+
+function quoteQualifiedName(table: TableSnapshot): string {
+  return `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
 }

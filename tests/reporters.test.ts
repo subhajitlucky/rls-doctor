@@ -28,6 +28,7 @@ describe("reporters", () => {
     expect(text).toContain("RLS Doctor Report");
     expect(text).toContain("public.orders");
     expect(text).toContain("[HIGH] Row Level Security is disabled");
+    expect(text).toContain('alter table "public"."orders" enable row level security;');
     expect(text).not.toContain("postgres://");
   });
 
@@ -46,5 +47,6 @@ describe("reporters", () => {
     expect(text).toContain("RLS: disabled");
     expect(text).toContain("Risk: HIGH");
     expect(text).toContain("Next steps");
+    expect(text).toContain("Suggested SQL");
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "rls-doctor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A CLI auditor for Postgres and Supabase Row Level Security posture.",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   "files": [
     "dist",
     "demo",
-    "docs/assets",
+    "docs",
     "README.md",
     "LICENSE"
   ],

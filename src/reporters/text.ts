@@ -63,6 +63,12 @@ export function renderExplainReport(table: TableAudit): string {
   } else {
     for (const finding of table.findings) {
       lines.push(`  - [${severityLabel[finding.severity]}] ${finding.recommendation}`);
+      if (finding.suggestedSql && finding.suggestedSql.length > 0) {
+        lines.push("    Suggested SQL:");
+        for (const sqlLine of finding.suggestedSql) {
+          lines.push(`      ${sqlLine}`);
+        }
+      }
     }
   }
 
@@ -87,6 +93,12 @@ function renderTable(table: TableAudit): string {
     lines.push(`  [${severityLabel[finding.severity]}] ${finding.title}`);
     lines.push(`    ${finding.detail}`);
     lines.push(`    Fix: ${finding.recommendation}`);
+    if (finding.suggestedSql && finding.suggestedSql.length > 0) {
+      lines.push("    Suggested SQL:");
+      for (const sqlLine of finding.suggestedSql) {
+        lines.push(`      ${sqlLine}`);
+      }
+    }
   }
 
   lines.push("");

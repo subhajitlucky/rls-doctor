@@ -35,6 +35,7 @@ export interface Finding {
   title: string;
   detail: string;
   recommendation: string;
+  suggestedSql?: string[];
 }
 
 export interface TableAudit {

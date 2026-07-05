@@ -29,6 +29,8 @@ Supabase and Postgres RLS are powerful, but small policy mistakes can expose ten
 
 The tool does not mutate your database and does not call Supabase management APIs.
 
+For Supabase projects, `rls-doctor` checks the RLS layer. Supabase Data API access also depends on grants to roles such as `anon`, `authenticated`, and `service_role`, so review grants and RLS policies together.
+
 ![RLS Doctor terminal preview](docs/assets/terminal-preview.svg)
 
 ## Install
@@ -84,6 +86,17 @@ SUPABASE_DB_URL=postgres://readonly_user:password@host:5432/postgres
 ```bash
 rls-doctor check --schema public --json --fail-on high
 ```
+
+GitHub Actions example:
+
+```yaml
+- name: Audit RLS
+  run: npx rls-doctor check --schema public --json --fail-on high
+  env:
+    DATABASE_URL: ${{ secrets.READONLY_DATABASE_URL }}
+```
+
+Full guide: [`docs/guides/github-actions.md`](docs/guides/github-actions.md)
 
 The command exits:
 
@@ -171,6 +184,10 @@ npm publish --access public
 - Unconditional public read/write policies.
 - Write policies without explicit `WITH CHECK`.
 - `FORCE ROW LEVEL SECURITY` hardening advisory.
+
+## Supabase Examples
+
+See [`docs/guides/supabase-rls-patterns.md`](docs/guides/supabase-rls-patterns.md) for unsafe and safer policy patterns.
 
 ## Roadmap
 
