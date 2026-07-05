@@ -37,6 +37,12 @@ The tool does not mutate your database and does not call Supabase management API
 npm install -g rls-doctor
 ```
 
+Or run without installing after the package is published:
+
+```bash
+npx rls-doctor check --connection "$DATABASE_URL"
+```
+
 For local development before publishing:
 
 ```bash
@@ -134,6 +140,28 @@ node dist/cli.js explain rls_doctor_demo.profiles --connection "$DATABASE_URL" -
 ```
 
 Do not run demo fixtures against production databases.
+
+## Development
+
+```bash
+npm ci
+npm run ci
+npm run test:integration
+```
+
+`npm run test:integration` starts a disposable Postgres Docker container, loads `demo/unsafe-schema.sql`, runs `check`, runs `explain`, and removes the container.
+
+## Publishing
+
+Publishing is manual. The repository includes `.github/workflows/publish.yml`, which expects an `NPM_TOKEN` repository secret.
+
+Local release checklist:
+
+```bash
+npm run ci:full
+npm pack --dry-run
+npm publish --access public
+```
 
 ## Current Checks
 

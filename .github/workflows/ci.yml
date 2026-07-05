@@ -43,3 +43,40 @@ jobs:
 
       - name: Audit dependencies
         run: npm audit --audit-level=low
+
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rls_doctor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rls_doctor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration test
+        run: npm run test:integration:db
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/rls_doctor

@@ -24,7 +24,7 @@ interface PolicyRow {
   name: string;
   command: string;
   permissive: string | boolean;
-  roles: string[];
+  roles: string[] | string;
   using_expression: string | null;
   check_expression: string | null;
 }
@@ -71,10 +71,28 @@ function mapPolicy(row: PolicyRow): PolicySnapshot {
     name: row.name,
     command: normalizeCommand(row.command),
     permissive: row.permissive === true || row.permissive === "PERMISSIVE",
-    roles: row.roles,
+    roles: normalizePolicyRoles(row.roles),
     usingExpression: row.using_expression,
     checkExpression: row.check_expression
   };
+}
+
+export function normalizePolicyRoles(roles: string[] | string): string[] {
+  if (Array.isArray(roles)) {
+    return roles;
+  }
+
+  const trimmed = roles.trim();
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    return trimmed
+      .slice(1, -1)
+      .split(",")
+      .map((role) => role.replace(/^"|"$/g, "").trim())
+      .filter(Boolean);
+  }
+
+  return trimmed ? [trimmed] : [];
 }
 
 function normalizeCommand(command: string): PolicyCommand {
