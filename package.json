@@ -3,6 +3,14 @@
   "version": "0.1.2",
   "description": "A CLI auditor for Postgres and Supabase Row Level Security posture.",
   "type": "module",
+  "homepage": "https://github.com/subhajitlucky/rls-doctor#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/subhajitlucky/rls-doctor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/subhajitlucky/rls-doctor/issues"
+  },
   "bin": {
     "rls-doctor": "dist/cli.js"
   },
@@ -28,11 +36,15 @@
   },
   "keywords": [
     "postgres",
+    "postgresql",
     "supabase",
     "rls",
+    "row-level-security",
+    "database-security",
     "security",
     "cli",
-    "audit"
+    "audit",
+    "developer-tools"
   ],
   "author": "Subhajit Pradhan",
   "license": "MIT",
