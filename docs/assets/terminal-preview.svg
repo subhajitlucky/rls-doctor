@@ -1,0 +1,23 @@
+<svg width="920" height="520" viewBox="0 0 920 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">RLS Doctor terminal report preview</title>
+  <desc id="desc">A terminal preview showing RLS Doctor finding a high risk disabled RLS table and critical public write policy.</desc>
+  <rect width="920" height="520" fill="#0f1115"/>
+  <rect x="24" y="24" width="872" height="472" rx="10" fill="#171a21" stroke="#2a2f3a"/>
+  <circle cx="52" cy="52" r="6" fill="#ff5f57"/>
+  <circle cx="74" cy="52" r="6" fill="#ffbd2e"/>
+  <circle cx="96" cy="52" r="6" fill="#28c840"/>
+  <text x="40" y="94" fill="#d7dde8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
+    <tspan x="40" dy="0">$ rls-doctor check --schema rls_doctor_demo --fail-on none</tspan>
+    <tspan x="40" dy="34">RLS Doctor Report</tspan>
+    <tspan x="40" dy="28">Schemas: rls_doctor_demo</tspan>
+    <tspan x="40" dy="28">Summary: 3 tables, 3 policies, highest risk CRITICAL</tspan>
+    <tspan x="40" dy="34">rls_doctor_demo.orders</tspan>
+    <tspan x="60" dy="26">RLS disabled; force RLS disabled; 0 policies</tspan>
+    <tspan x="60" dy="26" fill="#ffb86c">[HIGH] Row Level Security is disabled</tspan>
+    <tspan x="80" dy="24">Fix: Enable RLS and add least-privilege policies.</tspan>
+    <tspan x="40" dy="34">rls_doctor_demo.profiles</tspan>
+    <tspan x="60" dy="26">RLS enabled; force RLS disabled; 2 policies</tspan>
+    <tspan x="60" dy="26" fill="#ff6b6b">[CRITICAL] Anonymous-style role can write rows too broadly</tspan>
+    <tspan x="80" dy="24">Fix: Require authenticated ownership checks and WITH CHECK.</tspan>
+  </text>
+</svg>

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { analyzeCatalog, shouldFail } from "./audit/analyzer.js";
+import { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
 import type { Severity } from "./audit/types.js";
 import { loadCatalog } from "./db/catalog.js";
 import { renderJsonReport } from "./reporters/json.js";
-import { renderTextReport } from "./reporters/text.js";
+import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 
 const program = new Command();
 
@@ -50,6 +50,43 @@ program
     }
   });
 
+program
+  .command("explain")
+  .argument("<table>", "Table name, for example profiles or public.profiles.")
+  .description("Explain the RLS posture for one table.")
+  .option("-c, --connection <url>", "Postgres connection string. Defaults to DATABASE_URL or SUPABASE_DB_URL.")
+  .option("-s, --schema <schema...>", "Schema names to audit.", ["public"])
+  .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
+  .action(async (tableRef: string, options: ExplainOptions) => {
+    try {
+      const connectionString = resolveConnectionString(options.connection);
+      const schemas = normalizeSchemas(options.schema);
+      const statementTimeoutMs = Number(options.statementTimeout);
+
+      if (!Number.isFinite(statementTimeoutMs) || statementTimeoutMs <= 0) {
+        throw new Error("--statement-timeout must be a positive number.");
+      }
+
+      const snapshot = await loadCatalog({
+        connectionString,
+        schemas,
+        statementTimeoutMs
+      });
+
+      const report = analyzeCatalog(snapshot, { schemas });
+      const table = getTableAudit(report, tableRef);
+
+      if (!table) {
+        throw new Error(`Table not found in selected schemas: ${tableRef}`);
+      }
+
+      process.stdout.write(renderExplainReport(table));
+    } catch (error) {
+      process.stderr.write(`rls-doctor: ${formatError(error)}\n`);
+      process.exitCode = 2;
+    }
+  });
+
 program.parseAsync(process.argv);
 
 interface CheckOptions {
@@ -57,6 +94,12 @@ interface CheckOptions {
   schema: string[];
   json?: boolean;
   failOn: string;
+  statementTimeout: string;
+}
+
+interface ExplainOptions {
+  connection?: string;
+  schema: string[];
   statementTimeout: string;
 }
 

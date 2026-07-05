@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { analyzeCatalog } from "../src/audit/analyzer.js";
 import { renderJsonReport } from "../src/reporters/json.js";
+import { renderExplainReport } from "../src/reporters/text.js";
 import { renderTextReport } from "../src/reporters/text.js";
 
 describe("reporters", () => {
@@ -36,5 +37,14 @@ describe("reporters", () => {
 
     expect(parsed.summary.highestSeverity).toBe("high");
     expect(parsed.tables[0]?.table).toBe("orders");
+  });
+
+  it("renders a focused explanation for one table", () => {
+    const text = renderExplainReport(report.tables[0]!);
+
+    expect(text).toContain("public.orders");
+    expect(text).toContain("RLS: disabled");
+    expect(text).toContain("Risk: HIGH");
+    expect(text).toContain("Next steps");
   });
 });

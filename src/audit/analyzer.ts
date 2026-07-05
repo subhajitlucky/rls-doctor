@@ -45,6 +45,18 @@ export function shouldFail(report: AuditReport, failOn: Severity | "none"): bool
   return severityRank[report.summary.highestSeverity] >= severityRank[failOn];
 }
 
+export function getTableAudit(report: AuditReport, tableRef: string): TableAudit | undefined {
+  const [schemaPart, tablePart] = tableRef.includes(".") ? tableRef.split(".", 2) : ["public", tableRef];
+  const schema = schemaPart?.trim();
+  const table = tablePart?.trim();
+
+  if (!schema || !table) {
+    return undefined;
+  }
+
+  return report.tables.find((audit) => audit.schema === schema && audit.table === table);
+}
+
 function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudit {
   const findings: Finding[] = [];
 

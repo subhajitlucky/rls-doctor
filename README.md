@@ -1,5 +1,7 @@
 # RLS Doctor
 
+[![CI](https://github.com/subhajitlucky/rls-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/subhajitlucky/rls-doctor/actions/workflows/ci.yml)
+
 `rls-doctor` is a CLI auditor for Postgres and Supabase Row Level Security.
 
 It connects with a Postgres connection string, reads catalog metadata, and reports tables or policies that deserve review before they reach production.
@@ -26,6 +28,8 @@ public.orders
 Supabase and Postgres RLS are powerful, but small policy mistakes can expose tenant data. `rls-doctor` gives developers a fast local and CI check for obvious RLS misconfiguration.
 
 The tool does not mutate your database and does not call Supabase management APIs.
+
+![RLS Doctor terminal preview](docs/assets/terminal-preview.svg)
 
 ## Install
 
@@ -81,6 +85,56 @@ The command exits:
 - `1` when findings meet or exceed `--fail-on`.
 - `2` when the CLI cannot run, connect, or parse options.
 
+### `explain`
+
+Focus on one table:
+
+```bash
+rls-doctor explain public.profiles --connection "$DATABASE_URL"
+```
+
+Example output:
+
+```txt
+RLS Doctor Explain: public.profiles
+RLS: enabled
+Force RLS: disabled
+Policies: 2
+Risk: CRITICAL
+
+Policies
+  - anyone can read profiles: SELECT, permissive, roles public
+  - anon can update profiles: UPDATE, permissive, roles public
+
+Next steps
+  - [HIGH] Restrict the policy with tenant, owner, or explicit public-content predicates.
+  - [CRITICAL] Require authenticated ownership checks and explicit WITH CHECK constraints for writes.
+```
+
+## Demo
+
+The `demo` folder contains disposable SQL fixtures:
+
+- `demo/unsafe-schema.sql` creates intentionally risky policies.
+- `demo/safe-schema.sql` shows a safer reference shape.
+
+Print the local demo steps:
+
+```bash
+npm run demo
+```
+
+Run against a disposable database:
+
+```bash
+psql "$DATABASE_URL" -f demo/unsafe-schema.sql
+npm run build
+node dist/cli.js check --connection "$DATABASE_URL" --schema rls_doctor_demo --fail-on none
+node dist/cli.js explain rls_doctor_demo.profiles --connection "$DATABASE_URL" --schema rls_doctor_demo
+```
+
+Do not run demo fixtures against production databases.
+
 ## Current Checks
 
 - RLS disabled on selected schema tables.
@@ -93,8 +147,6 @@ The command exits:
 ## Roadmap
 
 - Policy diffing between branches.
-- `explain` command for table-specific policy summaries.
-- GitHub Actions example.
 - Markdown report output.
 - Optional SQL migration suggestions.
 

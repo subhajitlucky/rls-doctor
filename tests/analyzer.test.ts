@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeCatalog, shouldFail } from "../src/audit/analyzer.js";
+import { analyzeCatalog, getTableAudit, shouldFail } from "../src/audit/analyzer.js";
 import type { CatalogSnapshot } from "../src/audit/types.js";
 
 describe("analyzeCatalog", () => {
@@ -130,5 +130,49 @@ describe("shouldFail", () => {
     expect(shouldFail(report, "high")).toBe(true);
     expect(shouldFail(report, "medium")).toBe(true);
     expect(shouldFail(report, "none")).toBe(false);
+  });
+});
+
+describe("getTableAudit", () => {
+  it("finds a table audit by qualified name", () => {
+    const report = analyzeCatalog(
+      {
+        tables: [
+          {
+            schema: "public",
+            name: "profiles",
+            rlsEnabled: true,
+            forceRls: true,
+            isPartitioned: false,
+            estimatedRows: null
+          }
+        ],
+        policies: []
+      },
+      { schemas: ["public"] }
+    );
+
+    expect(getTableAudit(report, "public.profiles")?.table).toBe("profiles");
+  });
+
+  it("treats unqualified table names as public schema names", () => {
+    const report = analyzeCatalog(
+      {
+        tables: [
+          {
+            schema: "public",
+            name: "profiles",
+            rlsEnabled: true,
+            forceRls: true,
+            isPartitioned: false,
+            estimatedRows: null
+          }
+        ],
+        policies: []
+      },
+      { schemas: ["public"] }
+    );
+
+    expect(getTableAudit(report, "profiles")?.schema).toBe("public");
   });
 });

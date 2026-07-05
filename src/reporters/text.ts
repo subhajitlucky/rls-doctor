@@ -34,6 +34,41 @@ export function renderTextReport(report: AuditReport): string {
   return `${lines.join("\n")}\n`;
 }
 
+export function renderExplainReport(table: TableAudit): string {
+  const lines: string[] = [];
+  const highestRisk = table.findings
+    .map((finding) => finding.severity)
+    .sort((a, b) => severityWeight(b) - severityWeight(a))[0] ?? "info";
+
+  lines.push(`RLS Doctor Explain: ${table.schema}.${table.table}`);
+  lines.push(`RLS: ${table.rlsEnabled ? "enabled" : "disabled"}`);
+  lines.push(`Force RLS: ${table.forceRls ? "enabled" : "disabled"}`);
+  lines.push(`Policies: ${table.policies.length}`);
+  lines.push(`Risk: ${severityLabel[highestRisk]}`);
+  lines.push("");
+
+  if (table.policies.length > 0) {
+    lines.push("Policies");
+    for (const policy of table.policies) {
+      lines.push(
+        `  - ${policy.name}: ${policy.command}, ${policy.permissive ? "permissive" : "restrictive"}, roles ${policy.roles.join(", ")}`
+      );
+    }
+    lines.push("");
+  }
+
+  lines.push("Next steps");
+  if (table.findings.length === 0) {
+    lines.push("  - No catalog-level issues found for this table.");
+  } else {
+    for (const finding of table.findings) {
+      lines.push(`  - [${severityLabel[finding.severity]}] ${finding.recommendation}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 function renderTable(table: TableAudit): string {
   const lines: string[] = [];
   const status = table.rlsEnabled ? "RLS enabled" : "RLS disabled";
@@ -56,4 +91,16 @@ function renderTable(table: TableAudit): string {
 
   lines.push("");
   return lines.join("\n");
+}
+
+function severityWeight(severity: Severity): number {
+  const weights: Record<Severity, number> = {
+    info: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4
+  };
+
+  return weights[severity];
 }

@@ -14,6 +14,8 @@
   "scripts": {
     "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean",
     "check": "tsc --noEmit",
+    "ci": "npm run check && npm test && npm run build && npm audit --audit-level=low",
+    "demo": "node scripts/print-demo.js",
     "test": "vitest run",
     "dev": "tsx src/cli.ts",
     "prepare": "npm run build"
