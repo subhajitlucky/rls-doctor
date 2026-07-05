@@ -104,6 +104,24 @@ The command exits:
 - `1` when findings meet or exceed `--fail-on`.
 - `2` when the CLI cannot run, connect, or parse options.
 
+## Agent Skill
+
+This repository also exposes an `rls-doctor` agent skill at `.agents/skills/rls-doctor/SKILL.md`.
+
+Install the skill from GitHub with:
+
+```bash
+npx skills add subhajitlucky/rls-doctor
+```
+
+Optional discovery only:
+
+```bash
+npx skills add subhajitlucky/rls-doctor --list
+```
+
+The skill teaches compatible agents when to use the CLI, how to run safe RLS audits, and how to avoid leaking database credentials.
+
 ### `explain`
 
 Focus on one table:
