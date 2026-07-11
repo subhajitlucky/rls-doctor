@@ -7,6 +7,10 @@
 
 It connects to a database with a Postgres connection string, reads catalog metadata, and reports RLS risks before they ship to production.
 
+- Status: Published CLI
+- Portfolio case study: https://subhajitpradhan.vercel.app/projects/rls-doctor
+- Inspect the implementation: `src/audit/analyzer.ts`, `scripts/run-integration.js`, and `.agents/skills/rls-doctor/SKILL.md`
+
 ```bash
 npx rls-doctor check --connection "$DATABASE_URL"
 ```
