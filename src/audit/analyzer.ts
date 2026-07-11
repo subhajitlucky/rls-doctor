@@ -30,6 +30,7 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
     .sort((a, b) => `${a.schema}.${a.table}`.localeCompare(`${b.schema}.${b.table}`));
 
   return {
+    schemaVersion: "1.0",
     generatedAt: generatedAt.toISOString(),
     schemas: options.schemas,
     summary: summarize(tables, snapshot.policies.length),
@@ -42,7 +43,9 @@ export function shouldFail(report: AuditReport, failOn: Severity | "none"): bool
     return false;
   }
 
-  return severityRank[report.summary.highestSeverity] >= severityRank[failOn];
+  return severityOrder.some(
+    (severity) => severityRank[severity] >= severityRank[failOn] && report.summary.findings[severity] > 0
+  );
 }
 
 export function getTableAudit(report: AuditReport, tableRef: string): TableAudit | undefined {
@@ -210,7 +213,7 @@ function summarize(tables: TableAudit[], policyCount: number): AuditSummary {
 
   const highestSeverity = [...severityOrder]
     .reverse()
-    .find((severity) => findings[severity] > 0) ?? "info";
+    .find((severity) => findings[severity] > 0) ?? "none";
 
   return {
     tables: tables.length,

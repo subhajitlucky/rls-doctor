@@ -1,6 +1,7 @@
-import type { AuditReport, Severity, TableAudit } from "../audit/types.js";
+import type { AuditReport, HighestSeverity, Severity, TableAudit } from "../audit/types.js";
 
-const severityLabel: Record<Severity, string> = {
+const severityLabel: Record<HighestSeverity, string> = {
+  none: "NONE",
   info: "INFO",
   low: "LOW",
   medium: "MEDIUM",

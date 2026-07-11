@@ -1,5 +1,7 @@
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 
+export type HighestSeverity = Severity | "none";
+
 export type PolicyCommand = "ALL" | "SELECT" | "INSERT" | "UPDATE" | "DELETE";
 
 export interface TableSnapshot {
@@ -51,10 +53,11 @@ export interface AuditSummary {
   tables: number;
   policies: number;
   findings: Record<Severity, number>;
-  highestSeverity: Severity;
+  highestSeverity: HighestSeverity;
 }
 
 export interface AuditReport {
+  schemaVersion: "1.0";
   generatedAt: string;
   schemas: string[];
   summary: AuditSummary;

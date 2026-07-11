@@ -100,7 +100,8 @@ describe("analyzeCatalog", () => {
       { schemas: ["public"] }
     );
 
-    expect(report.summary.highestSeverity).toBe("info");
+    expect(report.summary.highestSeverity).toBe("none");
+    expect(shouldFail(report, "info")).toBe(false);
     expect(report.summary.findings.high).toBe(0);
     expect(report.summary.findings.critical).toBe(0);
     expect(report.tables[0]?.findings).toHaveLength(0);

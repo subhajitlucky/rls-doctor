@@ -36,8 +36,43 @@ describe("reporters", () => {
     const json = renderJsonReport(report);
     const parsed = JSON.parse(json) as typeof report;
 
+    expect(parsed.schemaVersion).toBe("1.0");
     expect(parsed.summary.highestSeverity).toBe("high");
     expect(parsed.tables[0]?.table).toBe("orders");
+  });
+
+  it("renders clean reports with no highest risk", () => {
+    const cleanReport = analyzeCatalog(
+      {
+        tables: [
+          {
+            schema: "public",
+            name: "tasks",
+            rlsEnabled: true,
+            forceRls: true,
+            isPartitioned: false,
+            estimatedRows: 4
+          }
+        ],
+        policies: [
+          {
+            schema: "public",
+            table: "tasks",
+            name: "users manage own tasks",
+            command: "ALL",
+            permissive: false,
+            roles: ["authenticated"],
+            usingExpression: "(owner_id = auth.uid())",
+            checkExpression: "(owner_id = auth.uid())"
+          }
+        ]
+      },
+      { schemas: ["public"] }
+    );
+
+    const text = renderTextReport(cleanReport);
+
+    expect(text).toContain("highest risk NONE");
   });
 
   it("renders a focused explanation for one table", () => {
