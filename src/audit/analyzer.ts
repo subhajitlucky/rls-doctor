@@ -20,7 +20,6 @@ const severityRank: Record<Severity, number> = {
 
 const severityOrder: Severity[] = ["info", "low", "medium", "high", "critical"];
 const publicLikeRoles = new Set(["public", "anon", "anonymous"]);
-const writeCommands = new Set(["ALL", "INSERT", "UPDATE"]);
 
 export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions): AuditReport {
   const generatedAt = options.generatedAt ?? new Date();
@@ -123,10 +122,11 @@ function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudi
 function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
   const findings: Finding[] = [];
   const grantsPublicLikeRole = policy.roles.some((role) => publicLikeRoles.has(role.toLowerCase()));
-  const unconditionalUsing = isUnconditionalExpression(policy.usingExpression);
-  const unconditionalCheck = isUnconditionalExpression(policy.checkExpression);
+  const evaluatesUsingForRead = policy.command === "SELECT" || policy.command === "ALL";
+  const unconditionalRead = evaluatesUsingForRead && isUnconditionalExpression(policy.usingExpression);
+  const unconditionalWrite = hasUnconditionalWriteBehavior(policy);
 
-  if (grantsPublicLikeRole && (policy.command === "ALL" || policy.command === "SELECT") && unconditionalUsing) {
+  if (grantsPublicLikeRole && unconditionalRead) {
     findings.push({
       id: "public-unconditional-read",
       severity: "high",
@@ -136,15 +136,15 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
       detail: `Policy "${policy.name}" grants ${policy.command} to ${policy.roles.join(", ")} with no row predicate.`,
       recommendation: "Restrict the policy with tenant, owner, or explicit public-content predicates.",
       suggestedSql: [
-        `-- Replace broad read access with an explicit public-content predicate.`,
+        `-- Adapt this suggested SQL to your schema and access model before executing it.`,
         `alter policy ${quoteIdentifier(policy.name)}`,
         `  on ${quoteQualifiedName(table)}`,
-        `  using (is_public = true);`
+        `  using (<public_read_predicate>);`
       ]
     });
   }
 
-  if (grantsPublicLikeRole && writeCommands.has(policy.command) && (unconditionalUsing || unconditionalCheck)) {
+  if (grantsPublicLikeRole && unconditionalWrite) {
     findings.push({
       id: "public-unconditional-write",
       severity: "critical",
@@ -152,19 +152,12 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
       table: table.name,
       title: "Anonymous-style role can write rows too broadly",
       detail: `Policy "${policy.name}" allows ${policy.command} for ${policy.roles.join(", ")} with an unconditional predicate.`,
-      recommendation: "Require authenticated ownership checks and explicit WITH CHECK constraints for writes.",
-      suggestedSql: [
-        `-- Prefer authenticated ownership checks for writes.`,
-        `alter policy ${quoteIdentifier(policy.name)}`,
-        `  on ${quoteQualifiedName(table)}`,
-        `  to authenticated`,
-        `  using ((select auth.uid()) = owner_id)`,
-        `  with check ((select auth.uid()) = owner_id);`
-      ]
+      recommendation: writePolicyRecommendation(policy),
+      suggestedSql: suggestedWritePolicySql(table, policy)
     });
   }
 
-  if (writeCommands.has(policy.command) && policy.checkExpression === null) {
+  if (missingCheckCreatesUnconstrainedWrite(policy)) {
     findings.push({
       id: "write-policy-missing-check",
       severity: "medium",
@@ -174,9 +167,10 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
       detail: `Policy "${policy.name}" handles ${policy.command} without an explicit insert/update constraint.`,
       recommendation: "Add WITH CHECK so new or changed rows must satisfy the same ownership and tenant boundaries.",
       suggestedSql: [
+        `-- Adapt this suggested SQL to your schema and access model before executing it.`,
         `alter policy ${quoteIdentifier(policy.name)}`,
         `  on ${quoteQualifiedName(table)}`,
-        `  with check ((select auth.uid()) = owner_id);`
+        `  with check ((select auth.uid()) = <owner_column>);`
       ]
     });
   }
@@ -194,6 +188,75 @@ function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
   }
 
   return findings;
+}
+
+function effectiveCheckExpression(policy: PolicySnapshot): string | null {
+  if (policy.checkExpression !== null) {
+    return policy.checkExpression;
+  }
+
+  if (policy.command === "UPDATE" || policy.command === "ALL") {
+    return policy.usingExpression;
+  }
+
+  return null;
+}
+
+function hasUnconditionalWriteBehavior(policy: PolicySnapshot): boolean {
+  switch (policy.command) {
+    case "SELECT":
+      return false;
+    case "INSERT":
+      return isUnconditionalExpression(effectiveCheckExpression(policy));
+    case "UPDATE":
+    case "ALL":
+      return (
+        isUnconditionalExpression(policy.usingExpression) ||
+        isUnconditionalExpression(effectiveCheckExpression(policy))
+      );
+    case "DELETE":
+      return isUnconditionalExpression(policy.usingExpression);
+  }
+}
+
+function missingCheckCreatesUnconstrainedWrite(policy: PolicySnapshot): boolean {
+  if (policy.checkExpression !== null || policy.command === "SELECT" || policy.command === "DELETE") {
+    return false;
+  }
+
+  return isUnconditionalExpression(effectiveCheckExpression(policy));
+}
+
+function writePolicyRecommendation(policy: PolicySnapshot): string {
+  if (policy.command === "INSERT") {
+    return "Require an authenticated ownership constraint in WITH CHECK for inserted rows.";
+  }
+
+  if (policy.command === "DELETE") {
+    return "Require an authenticated ownership constraint in USING for deleted rows.";
+  }
+
+  return "Require authenticated ownership constraints in USING and WITH CHECK for writes.";
+}
+
+function suggestedWritePolicySql(table: TableSnapshot, policy: PolicySnapshot): string[] {
+  const sql = [
+    `-- Adapt this suggested SQL to your schema and access model before executing it.`,
+    `alter policy ${quoteIdentifier(policy.name)}`,
+    `  on ${quoteQualifiedName(table)}`,
+    `  to authenticated`
+  ];
+
+  if (policy.command === "ALL" || policy.command === "UPDATE" || policy.command === "DELETE") {
+    sql.push(`  using ((select auth.uid()) = <owner_column>)`);
+  }
+
+  if (policy.command === "ALL" || policy.command === "INSERT" || policy.command === "UPDATE") {
+    sql.push(`  with check ((select auth.uid()) = <owner_column>)`);
+  }
+
+  sql[sql.length - 1] += ";";
+  return sql;
 }
 
 function summarize(tables: TableAudit[], policyCount: number): AuditSummary {
