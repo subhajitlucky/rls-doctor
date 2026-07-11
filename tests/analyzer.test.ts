@@ -33,6 +33,10 @@ function findingSignatures(findings: ReturnType<typeof analyzePolicy>) {
   return findings.map(({ id, severity }) => ({ id, severity }));
 }
 
+function compositionFindings(findings: ReturnType<typeof analyzePolicy>) {
+  return findings.filter((finding) => finding.id === "multiple-permissive-policies");
+}
+
 function analyzePolicies(policies: Array<Omit<PolicySnapshot, "schema" | "table">>) {
   return analyzeCatalog(
     {
@@ -382,6 +386,122 @@ describe("analyzeCatalog", () => {
       expect(compositionFindings[0]).toMatchObject({ severity: "low" });
       expect(compositionFindings[0]?.detail).toContain('Restrictive policy "active accounts only"');
       expect(compositionFindings[0]?.detail).toContain("AND-combined");
+    });
+
+    it("applies permissive and restrictive PUBLIC policies to a named role", () => {
+      const policies: Array<Omit<PolicySnapshot, "schema" | "table">> = [
+        {
+          name: "public documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["public"],
+          usingExpression: "published_at is not null",
+          checkExpression: null
+        },
+        {
+          name: "team documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["authenticated"],
+          usingExpression: "team_id = current_team_id()",
+          checkExpression: null
+        },
+        {
+          name: "account guard",
+          command: "ALL",
+          permissive: false,
+          roles: ["public"],
+          usingExpression: "account_is_active()",
+          checkExpression: "account_is_active()"
+        }
+      ];
+      const expected = [
+        {
+          id: "multiple-permissive-policies",
+          severity: "low",
+          schema: "public",
+          table: "documents",
+          title: "Multiple permissive policies combine for one role and command",
+          detail:
+            'Role authenticated has 2 permissive policies for SELECT: "public documents", "team documents". Their predicates are OR-combined. Restrictive policy "account guard" is AND-combined with the permissive result.',
+          recommendation:
+            "Review the policies together and confirm that access allowed by any permissive policy is intended."
+        }
+      ];
+
+      expect(compositionFindings(analyzePolicies(policies))).toEqual(expected);
+      expect(compositionFindings(analyzePolicies([...policies].reverse()))).toEqual(expected);
+    });
+
+    it("deduplicates a PUBLIC policy that also lists the named role", () => {
+      const findings = analyzePolicies([
+        {
+          name: "public documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["public", "authenticated", "authenticated"],
+          usingExpression: "published_at is not null",
+          checkExpression: null
+        },
+        {
+          name: "team documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["authenticated"],
+          usingExpression: "team_id = current_team_id()",
+          checkExpression: null
+        }
+      ]);
+
+      expect(compositionFindings(findings)).toEqual([
+        expect.objectContaining({
+          detail:
+            'Role authenticated has 2 permissive policies for SELECT: "public documents", "team documents". Their predicates are OR-combined.'
+        })
+      ]);
+    });
+
+    it("preserves canonical role identity when grouping permissive policies", () => {
+      const findings = analyzePolicies([
+        {
+          name: "Foo owned documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["Foo"],
+          usingExpression: "owner_id = auth.uid()",
+          checkExpression: null
+        },
+        {
+          name: "Foo team documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["Foo"],
+          usingExpression: "team_id = current_team_id()",
+          checkExpression: null
+        },
+        {
+          name: "lowercase foo documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["foo"],
+          usingExpression: "published_at is not null",
+          checkExpression: null
+        }
+      ]);
+
+      expect(compositionFindings(findings)).toEqual([
+        {
+          id: "multiple-permissive-policies",
+          severity: "low",
+          schema: "public",
+          table: "documents",
+          title: "Multiple permissive policies combine for one role and command",
+          detail:
+            'Role Foo has 2 permissive policies for SELECT: "Foo owned documents", "Foo team documents". Their predicates are OR-combined.',
+          recommendation:
+            "Review the policies together and confirm that access allowed by any permissive policy is intended."
+        }
+      ]);
     });
   });
 });

@@ -138,11 +138,16 @@ interface PolicyCompositionGroup {
 
 function auditPolicyComposition(table: TableSnapshot, policies: PolicySnapshot[]): Finding[] {
   const groups = new Map<string, PolicyCompositionGroup>();
+  const tableRoles = new Set(policies.flatMap((policy) => policy.roles));
 
   for (const policy of policies) {
     const commands = policy.command === "ALL" ? concreteCommands : [policy.command];
+    const declaredRoles = new Set(policy.roles);
+    // Preserve catalog role identity; only literal `public` has PUBLIC applicability,
+    // while case-folding is reserved for public-like risk classification.
+    const applicableRoles = declaredRoles.has("public") ? tableRoles : declaredRoles;
 
-    for (const role of new Set(policy.roles.map((policyRole) => policyRole.toLowerCase()))) {
+    for (const role of applicableRoles) {
       for (const command of commands) {
         const key = `${role}\u0000${command}`;
         const group = groups.get(key) ?? {
@@ -180,7 +185,7 @@ function compositionFinding(table: TableSnapshot, group: PolicyCompositionGroup)
 
   return {
     id: "multiple-permissive-policies",
-    severity: publicLikeRoles.has(group.role) ? "medium" : "low",
+    severity: publicLikeRoles.has(group.role.toLowerCase()) ? "medium" : "low",
     schema: table.schema,
     table: table.name,
     title: "Multiple permissive policies combine for one role and command",
