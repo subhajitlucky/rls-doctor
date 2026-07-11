@@ -22,6 +22,34 @@ describe("reporters", () => {
     { schemas: ["public"], generatedAt: new Date("2026-07-05T00:00:00.000Z") }
   );
 
+  const cleanReport = analyzeCatalog(
+    {
+      tables: [
+        {
+          schema: "public",
+          name: "tasks",
+          rlsEnabled: true,
+          forceRls: true,
+          isPartitioned: false,
+          estimatedRows: 4
+        }
+      ],
+      policies: [
+        {
+          schema: "public",
+          table: "tasks",
+          name: "users manage own tasks",
+          command: "ALL",
+          permissive: false,
+          roles: ["authenticated"],
+          usingExpression: "(owner_id = auth.uid())",
+          checkExpression: "(owner_id = auth.uid())"
+        }
+      ]
+    },
+    { schemas: ["public"] }
+  );
+
   it("renders text without exposing connection data", () => {
     const text = renderTextReport(report);
 
@@ -42,37 +70,15 @@ describe("reporters", () => {
   });
 
   it("renders clean reports with no highest risk", () => {
-    const cleanReport = analyzeCatalog(
-      {
-        tables: [
-          {
-            schema: "public",
-            name: "tasks",
-            rlsEnabled: true,
-            forceRls: true,
-            isPartitioned: false,
-            estimatedRows: 4
-          }
-        ],
-        policies: [
-          {
-            schema: "public",
-            table: "tasks",
-            name: "users manage own tasks",
-            command: "ALL",
-            permissive: false,
-            roles: ["authenticated"],
-            usingExpression: "(owner_id = auth.uid())",
-            checkExpression: "(owner_id = auth.uid())"
-          }
-        ]
-      },
-      { schemas: ["public"] }
-    );
-
     const text = renderTextReport(cleanReport);
 
     expect(text).toContain("highest risk NONE");
+  });
+
+  it("renders a clean table explanation with no risk", () => {
+    const text = renderExplainReport(cleanReport.tables[0]!);
+
+    expect(text).toContain("Risk: NONE");
   });
 
   it("renders a focused explanation for one table", () => {

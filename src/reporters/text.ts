@@ -37,9 +37,9 @@ export function renderTextReport(report: AuditReport): string {
 
 export function renderExplainReport(table: TableAudit): string {
   const lines: string[] = [];
-  const highestRisk = table.findings
+  const highestRisk: HighestSeverity = table.findings
     .map((finding) => finding.severity)
-    .sort((a, b) => severityWeight(b) - severityWeight(a))[0] ?? "info";
+    .sort((a, b) => severityWeight(b) - severityWeight(a))[0] ?? "none";
 
   lines.push(`RLS Doctor Explain: ${table.schema}.${table.table}`);
   lines.push(`RLS: ${table.rlsEnabled ? "enabled" : "disabled"}`);

@@ -106,6 +106,16 @@ describe("analyzeCatalog", () => {
     expect(report.summary.findings.critical).toBe(0);
     expect(report.tables[0]?.findings).toHaveLength(0);
   });
+
+  it("represents an empty catalog as clean", () => {
+    const report = analyzeCatalog(
+      { tables: [], policies: [] },
+      { schemas: ["public"] }
+    );
+
+    expect(report.summary.highestSeverity).toBe("none");
+    expect(shouldFail(report, "info")).toBe(false);
+  });
 });
 
 describe("shouldFail", () => {
