@@ -70,6 +70,18 @@ export interface RoleRow {
 export interface RoleMembershipRow {
   role: string;
   member: string;
+  inherit_option: boolean;
+  set_option: boolean;
+}
+
+export interface LegacyRoleMembershipRow {
+  role: string;
+  member: string;
+  member_inherits: boolean;
+}
+
+interface ServerVersionRow {
+  server_version_num: string;
 }
 
 export async function loadCatalog(options: LoadCatalogOptions): Promise<CatalogSnapshot> {
@@ -81,25 +93,66 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<CatalogS
 
   await client.connect();
 
-  try {
-    const [tables, policies, relationPrivileges, defaultPrivileges, roles, roleMemberships] =
-      await Promise.all([
-        client.query<TableRow>(tablesSql, [options.schemas]),
-        client.query<PolicyRow>(policiesSql, [options.schemas]),
-        client.query<RelationPrivilegeRow>(relationPrivilegesSql, [options.schemas]),
-        client.query<DefaultPrivilegeRow>(defaultPrivilegesSql, [options.schemas]),
-        client.query<RoleRow>(rolesSql),
-        client.query<RoleMembershipRow>(roleMembershipsSql)
-      ]);
+  let transactionStarted = false;
 
-    return {
+  try {
+    await client.query("begin transaction isolation level repeatable read read only");
+    transactionStarted = true;
+
+    const version = await client.query<ServerVersionRow>("show server_version_num");
+    const serverVersionNum = Number(version.rows[0]?.server_version_num);
+
+    if (!Number.isInteger(serverVersionNum)) {
+      throw new Error("PostgreSQL did not return a valid server_version_num");
+    }
+
+    // These reads are intentionally sequential. A single pg Client serializes Promise.all calls,
+    // and one read-only REPEATABLE READ transaction guarantees a consistent catalog snapshot.
+    const tables = await client.query<TableRow>(tablesSql, [options.schemas]);
+    const policies = await client.query<PolicyRow>(policiesSql, [options.schemas]);
+    const relationPrivileges = await client.query<RelationPrivilegeRow>(relationPrivilegesSql, [
+      options.schemas
+    ]);
+    const defaultPrivileges = await client.query<DefaultPrivilegeRow>(defaultPrivilegesSql, [
+      options.schemas
+    ]);
+    const roles = await client.query<RoleRow>(rolesSql);
+
+    // PostgreSQL 16 introduced per-membership INHERIT and SET options. The legacy query must stay
+    // separate so PostgreSQL 15 and older never parse columns that do not exist there.
+    const roleMemberships =
+      serverVersionNum >= 160_000
+        ? (
+            await client.query<RoleMembershipRow>(roleMembershipsSql)
+          ).rows.map(mapRoleMembership)
+        : (
+            await client.query<LegacyRoleMembershipRow>(legacyRoleMembershipsSql)
+          ).rows.map(mapLegacyRoleMembership);
+
+    const snapshot: CatalogSnapshot = {
       tables: tables.rows.map(mapTable),
       policies: policies.rows.map(mapPolicy),
       relationPrivileges: relationPrivileges.rows.map(mapRelationPrivilege),
       defaultPrivileges: defaultPrivileges.rows.map(mapDefaultPrivilege),
       roles: roles.rows.map(mapRole),
-      roleMemberships: roleMemberships.rows.map(mapRoleMembership)
+      roleMemberships
     };
+
+    const relevantTopology = filterRelevantRoleTopology(snapshot);
+    await client.query("commit");
+    transactionStarted = false;
+
+    return { ...snapshot, ...relevantTopology };
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query("rollback");
+      } catch {
+        // Preserve the catalog error; connection cleanup still runs below.
+      }
+    }
+
+    throw error;
   } finally {
     await client.end();
   }
@@ -155,8 +208,93 @@ export function mapRole(row: RoleRow): RoleSnapshot {
 export function mapRoleMembership(row: RoleMembershipRow): RoleMembershipSnapshot {
   return {
     role: row.role,
-    member: row.member
+    member: row.member,
+    inheritOption: row.inherit_option,
+    setOption: row.set_option
   };
+}
+
+export function mapLegacyRoleMembership(row: LegacyRoleMembershipRow): RoleMembershipSnapshot {
+  return {
+    role: row.role,
+    member: row.member,
+    // Before PostgreSQL 16, automatic inheritance was controlled by the member role's INHERIT
+    // attribute, while every membership allowed SET ROLE.
+    inheritOption: row.member_inherits,
+    setOption: true
+  };
+}
+
+export function filterRelevantRoleTopology(snapshot: CatalogSnapshot): {
+  roles: RoleSnapshot[];
+  roleMemberships: RoleMembershipSnapshot[];
+} {
+  const roles = snapshot.roles ?? [];
+  const roleMemberships = snapshot.roleMemberships ?? [];
+  const relevantNames = seedRelevantRoleNames(snapshot);
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const membership of roleMemberships) {
+    if (!membership.inheritOption && !membership.setOption) {
+      continue;
+    }
+
+    addNeighbor(adjacency, membership.role, membership.member);
+    addNeighbor(adjacency, membership.member, membership.role);
+  }
+
+  const queue = [...relevantNames];
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index]!;
+    for (const neighbor of adjacency.get(current) ?? []) {
+      if (!relevantNames.has(neighbor)) {
+        relevantNames.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+
+  // The cluster catalogs are needed to compute recursive closure, but only the connected
+  // inheritance/SET ROLE neighborhoods rooted in audited catalog identities leave the loader.
+  return {
+    roles: roles.filter((role) => relevantNames.has(role.name)),
+    roleMemberships: roleMemberships.filter(
+      (membership) =>
+        relevantNames.has(membership.role) && relevantNames.has(membership.member)
+    )
+  };
+}
+
+function seedRelevantRoleNames(snapshot: CatalogSnapshot): Set<string> {
+  const names = new Set<string>();
+
+  for (const table of snapshot.tables) {
+    if (table.owner) names.add(table.owner);
+  }
+
+  for (const policy of snapshot.policies) {
+    for (const role of policy.roles) {
+      if (role !== "public") names.add(role);
+    }
+  }
+
+  for (const privilege of snapshot.relationPrivileges ?? []) {
+    names.add(privilege.grantor);
+    if (privilege.grantee !== "PUBLIC") names.add(privilege.grantee);
+  }
+
+  for (const privilege of snapshot.defaultPrivileges ?? []) {
+    names.add(privilege.owner);
+    if (privilege.grantee !== "PUBLIC") names.add(privilege.grantee);
+  }
+
+  return names;
+}
+
+function addNeighbor(adjacency: Map<string, Set<string>>, role: string, neighbor: string): void {
+  const neighbors = adjacency.get(role) ?? new Set<string>();
+  neighbors.add(neighbor);
+  adjacency.set(role, neighbors);
 }
 
 function mapPolicy(row: PolicyRow): PolicySnapshot {
@@ -302,7 +440,20 @@ const rolesSql = `
 const roleMembershipsSql = `
   select
     role.rolname as role,
-    member.rolname as member
+    member.rolname as member,
+    membership.inherit_option,
+    membership.set_option
+  from pg_auth_members membership
+  join pg_roles role on role.oid = membership.roleid
+  join pg_roles member on member.oid = membership.member
+  order by role.rolname, member.rolname;
+`;
+
+const legacyRoleMembershipsSql = `
+  select
+    role.rolname as role,
+    member.rolname as member,
+    member.rolinherit as member_inherits
   from pg_auth_members membership
   join pg_roles role on role.oid = membership.roleid
   join pg_roles member on member.oid = membership.member

@@ -16,7 +16,7 @@ export type RelationPrivilege =
 export interface TableSnapshot {
   schema: string;
   name: string;
-  owner: string;
+  owner?: string;
   rlsEnabled: boolean;
   forceRls: boolean;
   isPartitioned: boolean;
@@ -51,6 +51,8 @@ export interface RoleSnapshot {
 export interface RoleMembershipSnapshot {
   role: string;
   member: string;
+  inheritOption: boolean;
+  setOption: boolean;
 }
 
 export interface PolicySnapshot {
@@ -67,10 +69,10 @@ export interface PolicySnapshot {
 export interface CatalogSnapshot {
   tables: TableSnapshot[];
   policies: PolicySnapshot[];
-  relationPrivileges: RelationPrivilegeSnapshot[];
-  defaultPrivileges: DefaultPrivilegeSnapshot[];
-  roles: RoleSnapshot[];
-  roleMemberships: RoleMembershipSnapshot[];
+  relationPrivileges?: RelationPrivilegeSnapshot[];
+  defaultPrivileges?: DefaultPrivilegeSnapshot[];
+  roles?: RoleSnapshot[];
+  roleMemberships?: RoleMembershipSnapshot[];
 }
 
 export interface Finding {

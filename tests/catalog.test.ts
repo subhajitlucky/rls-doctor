@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  filterRelevantRoleTopology,
   mapDefaultPrivilege,
+  mapLegacyRoleMembership,
   mapRelationPrivilege,
   mapRole,
   mapRoleMembership,
   mapTable,
   normalizePolicyRoles
 } from "../src/db/catalog.js";
+import type {
+  CatalogSnapshot as PublicCatalogSnapshot,
+  DefaultPrivilegeSnapshot,
+  RelationPrivilege,
+  RelationPrivilegeSnapshot,
+  RoleMembershipSnapshot,
+  RoleSnapshot
+} from "../src/index.js";
 
 describe("normalizePolicyRoles", () => {
   it("keeps native Postgres text arrays", () => {
@@ -93,10 +103,45 @@ describe("catalog row mapping", () => {
     });
   });
 
-  it("maps role memberships without folding either identity", () => {
-    expect(mapRoleMembership({ role: "Reporting Team", member: "CaseSensitiveUser" })).toEqual({
+  it("maps PostgreSQL 16 membership options without folding either identity", () => {
+    expect(
+      mapRoleMembership({
+        role: "Reporting Team",
+        member: "CaseSensitiveUser",
+        inherit_option: true,
+        set_option: false
+      })
+    ).toEqual({
       role: "Reporting Team",
-      member: "CaseSensitiveUser"
+      member: "CaseSensitiveUser",
+      inheritOption: true,
+      setOption: false
+    });
+  });
+
+  it("preserves disabled PostgreSQL 16 membership options", () => {
+    expect(
+      mapRoleMembership({
+        role: "No Automatic Access",
+        member: "CaseSensitiveUser",
+        inherit_option: false,
+        set_option: false
+      })
+    ).toMatchObject({ inheritOption: false, setOption: false });
+  });
+
+  it("normalizes legacy memberships using member INHERIT and SET ROLE semantics", () => {
+    expect(
+      mapLegacyRoleMembership({
+        role: "Reporting Team",
+        member: "LegacyUser",
+        member_inherits: false
+      })
+    ).toEqual({
+      role: "Reporting Team",
+      member: "LegacyUser",
+      inheritOption: false,
+      setOption: true
     });
   });
 
@@ -112,5 +157,185 @@ describe("catalog row mapping", () => {
         estimated_rows: "12"
       })
     ).toMatchObject({ owner: "Table Owner", estimatedRows: 12 });
+  });
+});
+
+describe("public snapshot compatibility", () => {
+  it("accepts the pre-metadata catalog shape through the package type exports", () => {
+    const snapshot: PublicCatalogSnapshot = {
+      tables: [
+        {
+          schema: "public",
+          name: "legacy_table",
+          rlsEnabled: true,
+          forceRls: false,
+          isPartitioned: false,
+          estimatedRows: null
+        }
+      ],
+      policies: []
+    };
+
+    const exportedTypes: [
+      RelationPrivilege?,
+      RelationPrivilegeSnapshot?,
+      DefaultPrivilegeSnapshot?,
+      RoleSnapshot?,
+      RoleMembershipSnapshot?
+    ] = [];
+
+    expect(snapshot.tables[0]?.name).toBe("legacy_table");
+    expect(exportedTypes).toEqual([]);
+  });
+});
+
+describe("filterRelevantRoleTopology", () => {
+  it("seeds owners, policy roles, and privilege identities but not PUBLIC", () => {
+    const role = (name: string) => ({
+      name,
+      superuser: false,
+      bypassRls: false,
+      inherits: true
+    });
+
+    const result = filterRelevantRoleTopology({
+      tables: [
+        {
+          schema: "app",
+          name: "documents",
+          owner: "table_owner",
+          rlsEnabled: true,
+          forceRls: false,
+          isPartitioned: false,
+          estimatedRows: null
+        }
+      ],
+      policies: [
+        {
+          schema: "app",
+          table: "documents",
+          name: "read documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["policy_role", "public"],
+          usingExpression: "true",
+          checkExpression: null
+        }
+      ],
+      relationPrivileges: [
+        {
+          schema: "app",
+          table: "documents",
+          grantor: "relation_grantor",
+          grantee: "relation_grantee",
+          privilege: "SELECT",
+          grantable: false
+        },
+        {
+          schema: "app",
+          table: "documents",
+          grantor: "relation_grantor",
+          grantee: "PUBLIC",
+          privilege: "SELECT",
+          grantable: false
+        }
+      ],
+      defaultPrivileges: [
+        {
+          schema: null,
+          owner: "default_owner",
+          grantee: "default_grantee",
+          objectType: "TABLE",
+          privilege: "SELECT",
+          grantable: false
+        }
+      ],
+      roles: [
+        role("default_grantee"),
+        role("default_owner"),
+        role("policy_role"),
+        role("relation_grantee"),
+        role("relation_grantor"),
+        role("table_owner"),
+        role("unrelated")
+      ],
+      roleMemberships: []
+    });
+
+    expect(result.roles.map((item) => item.name)).toEqual([
+      "default_grantee",
+      "default_owner",
+      "policy_role",
+      "relation_grantee",
+      "relation_grantor",
+      "table_owner"
+    ]);
+  });
+
+  it("keeps only the cycle-safe transitive neighborhood of catalog roles", () => {
+    const roles = [
+      { name: "app_owner", superuser: false, bypassRls: false, inherits: true },
+      { name: "app_user", superuser: false, bypassRls: false, inherits: true },
+      { name: "cycle_a", superuser: false, bypassRls: false, inherits: true },
+      { name: "cycle_b", superuser: false, bypassRls: false, inherits: true },
+      { name: "reader", superuser: false, bypassRls: false, inherits: true },
+      { name: "report_parent", superuser: false, bypassRls: false, inherits: true },
+      { name: "unrelated", superuser: false, bypassRls: false, inherits: true }
+    ];
+    const roleMemberships = [
+      {
+        role: "reader",
+        member: "app_user",
+        inheritOption: true,
+        setOption: true
+      },
+      {
+        role: "report_parent",
+        member: "reader",
+        inheritOption: true,
+        setOption: true
+      },
+      { role: "app_owner", member: "reader", inheritOption: false, setOption: false },
+      { role: "cycle_a", member: "cycle_b", inheritOption: true, setOption: true },
+      { role: "cycle_b", member: "cycle_a", inheritOption: true, setOption: true }
+    ];
+
+    const result = filterRelevantRoleTopology({
+      tables: [
+        {
+          schema: "app",
+          name: "documents",
+          owner: "app_owner",
+          rlsEnabled: true,
+          forceRls: false,
+          isPartitioned: false,
+          estimatedRows: null
+        }
+      ],
+      policies: [
+        {
+          schema: "app",
+          table: "documents",
+          name: "read documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["reader", "public"],
+          usingExpression: "true",
+          checkExpression: null
+        }
+      ],
+      relationPrivileges: [],
+      defaultPrivileges: [],
+      roles,
+      roleMemberships
+    });
+
+    expect(result.roles.map((role) => role.name)).toEqual([
+      "app_owner",
+      "app_user",
+      "reader",
+      "report_parent"
+    ]);
+    expect(result.roleMemberships).toEqual(roleMemberships.slice(0, 3));
   });
 });

@@ -6,8 +6,13 @@ export type {
   AuditOptions,
   AuditReport,
   CatalogSnapshot,
+  DefaultPrivilegeSnapshot,
   Finding,
   PolicySnapshot,
+  RelationPrivilege,
+  RelationPrivilegeSnapshot,
+  RoleMembershipSnapshot,
+  RoleSnapshot,
   Severity,
   TableAudit,
   TableSnapshot
