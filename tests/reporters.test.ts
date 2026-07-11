@@ -65,7 +65,7 @@ describe("reporters", () => {
 
     expect(text).toContain("RLS Doctor Report");
     expect(text).toContain("public.orders");
-    expect(text).toContain("[HIGH] Row Level Security is disabled");
+    expect(text).toContain("[MEDIUM] Row Level Security is disabled");
     expect(text).toContain('alter table "public"."orders" enable row level security;');
     expect(text).not.toContain("postgres://");
   });
@@ -75,8 +75,9 @@ describe("reporters", () => {
     const parsed = JSON.parse(json) as typeof report;
 
     expect(parsed.schemaVersion).toBe("1.0");
-    expect(parsed.summary.highestSeverity).toBe("high");
+    expect(parsed.summary.highestSeverity).toBe("medium");
     expect(parsed.tables[0]?.table).toBe("orders");
+    expect(parsed.schemaFindings).toEqual([]);
   });
 
   it("renders clean reports with no highest risk", () => {
@@ -96,8 +97,50 @@ describe("reporters", () => {
 
     expect(text).toContain("public.orders");
     expect(text).toContain("RLS: disabled");
-    expect(text).toContain("Risk: HIGH");
+    expect(text).toContain("Risk: MEDIUM");
     expect(text).toContain("Next steps");
     expect(text).toContain("Suggested SQL");
+  });
+
+  it("renders schema findings before table details", () => {
+    const schemaReport = analyzeCatalog(
+      {
+        ...emptyCatalogFacts,
+        tables: [
+          {
+            schema: "public",
+            name: "tasks",
+            owner: "postgres",
+            rlsEnabled: true,
+            forceRls: true,
+            isPartitioned: false,
+            estimatedRows: null
+          }
+        ],
+        policies: [],
+        defaultPrivileges: [
+          {
+            schema: "public",
+            owner: "postgres",
+            grantee: "PUBLIC",
+            objectType: "TABLE",
+            privilege: "DELETE",
+            grantable: false
+          }
+        ]
+      },
+      { schemas: ["public"] }
+    );
+    const text = renderTextReport(schemaReport);
+    const json = JSON.parse(renderJsonReport(schemaReport)) as typeof schemaReport;
+
+    expect(text).toContain("Schema and role findings");
+    expect(text).toContain("[HIGH] Broad default table privilege");
+    expect(text.indexOf("Schema and role findings")).toBeLessThan(text.indexOf("public.tasks"));
+    expect(json.schemaFindings[0]).toMatchObject({
+      id: "broad-default-table-privilege",
+      schema: "public",
+      severity: "high"
+    });
   });
 });

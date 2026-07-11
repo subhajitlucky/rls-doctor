@@ -86,6 +86,16 @@ export interface Finding {
   suggestedSql?: string[];
 }
 
+export interface SchemaFinding {
+  id: string;
+  severity: Severity;
+  schema: string | null;
+  title: string;
+  detail: string;
+  recommendation: string;
+  suggestedSql?: string[];
+}
+
 export interface TableAudit {
   schema: string;
   table: string;
@@ -107,6 +117,7 @@ export interface AuditReport {
   generatedAt: string;
   schemas: string[];
   summary: AuditSummary;
+  schemaFindings: SchemaFinding[];
   tables: TableAudit[];
 }
 

@@ -13,6 +13,7 @@ export type {
   RelationPrivilegeSnapshot,
   RoleMembershipSnapshot,
   RoleSnapshot,
+  SchemaFinding,
   Severity,
   TableAudit,
   TableSnapshot

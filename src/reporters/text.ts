@@ -1,4 +1,10 @@
-import type { AuditReport, HighestSeverity, Severity, TableAudit } from "../audit/types.js";
+import type {
+  AuditReport,
+  HighestSeverity,
+  SchemaFinding,
+  Severity,
+  TableAudit
+} from "../audit/types.js";
 
 const severityLabel: Record<HighestSeverity, string> = {
   none: "NONE",
@@ -24,6 +30,15 @@ export function renderTextReport(report: AuditReport): string {
   );
   lines.push("");
 
+  const schemaFindings = report.schemaFindings ?? [];
+  if (schemaFindings.length > 0) {
+    lines.push("Schema and role findings");
+    for (const finding of schemaFindings) {
+      lines.push(renderSchemaFinding(finding));
+    }
+    lines.push("");
+  }
+
   for (const table of report.tables) {
     lines.push(renderTable(table));
   }
@@ -33,6 +48,20 @@ export function renderTextReport(report: AuditReport): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function renderSchemaFinding(finding: SchemaFinding): string {
+  const lines = [
+    `  [${severityLabel[finding.severity]}] ${finding.title}`,
+    `    Scope: ${finding.schema ?? "all schemas / role level"}`,
+    `    ${finding.detail}`,
+    `    Fix: ${finding.recommendation}`
+  ];
+  if (finding.suggestedSql && finding.suggestedSql.length > 0) {
+    lines.push("    Suggested SQL:");
+    for (const sqlLine of finding.suggestedSql) lines.push(`      ${sqlLine}`);
+  }
+  return lines.join("\n");
 }
 
 export function renderExplainReport(table: TableAudit): string {

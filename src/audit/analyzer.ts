@@ -3,9 +3,14 @@ import type {
   AuditReport,
   AuditSummary,
   CatalogSnapshot,
+  DefaultPrivilegeSnapshot,
   Finding,
   PolicyCommand,
   PolicySnapshot,
+  RelationPrivilegeSnapshot,
+  RoleMembershipSnapshot,
+  RoleSnapshot,
+  SchemaFinding,
   Severity,
   TableAudit,
   TableSnapshot
@@ -21,19 +26,53 @@ const severityRank: Record<Severity, number> = {
 
 const severityOrder: Severity[] = ["info", "low", "medium", "high", "critical"];
 const publicLikeRoles = new Set(["public", "anon", "anonymous"]);
+const applicationRoleNames = new Set(["public", "anon", "anonymous", "authenticated"]);
+const rowAccessPrivileges = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]);
+
+type AccessMode = "direct" | "inherited" | "set-role";
+
+interface RoleAccess {
+  applicationRole: string;
+  targetRole: string;
+  mode: AccessMode;
+}
+
+interface RoleGraph {
+  applicationRoles: string[];
+  rolesByName: Map<string, RoleSnapshot>;
+  membershipsByMember: Map<string, RoleMembershipSnapshot[]>;
+}
 
 export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions): AuditReport {
   const generatedAt = options.generatedAt ?? new Date();
   const policiesByTable = groupPoliciesByTable(snapshot.policies);
+  const relationPrivileges = snapshot.relationPrivileges ?? [];
+  const defaultPrivileges = snapshot.defaultPrivileges ?? [];
+  const roles = snapshot.roles ?? [];
+  const roleMemberships = snapshot.roleMemberships ?? [];
+  const roleGraph = buildRoleGraph(snapshot, roles, roleMemberships);
+  const privilegesByTable = groupPrivilegesByTable(relationPrivileges);
+  const schemaFindings = [
+    ...auditDefaultPrivileges(defaultPrivileges, roleGraph),
+    ...auditBypassRoles(roles, roleGraph)
+  ].sort(compareSchemaFindings);
   const tables = snapshot.tables
-    .map((table) => auditTable(table, policiesByTable.get(tableKey(table.schema, table.name)) ?? []))
+    .map((table) =>
+      auditTable(
+        table,
+        policiesByTable.get(tableKey(table.schema, table.name)) ?? [],
+        privilegesByTable.get(tableKey(table.schema, table.name)) ?? [],
+        roleGraph
+      )
+    )
     .sort((a, b) => `${a.schema}.${a.table}`.localeCompare(`${b.schema}.${b.table}`));
 
   return {
     schemaVersion: "1.0",
     generatedAt: generatedAt.toISOString(),
     schemas: options.schemas,
-    summary: summarize(tables, snapshot.policies.length),
+    summary: summarize(tables, schemaFindings, snapshot.policies.length),
+    schemaFindings,
     tables
   };
 }
@@ -60,23 +99,39 @@ export function getTableAudit(report: AuditReport, tableRef: string): TableAudit
   return report.tables.find((audit) => audit.schema === schema && audit.table === table);
 }
 
-function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudit {
+function auditTable(
+  table: TableSnapshot,
+  policies: PolicySnapshot[],
+  privileges: RelationPrivilegeSnapshot[],
+  roleGraph: RoleGraph
+): TableAudit {
   const findings: Finding[] = [];
 
   if (!table.rlsEnabled) {
-    findings.push({
-      id: "rls-disabled",
-      severity: "high",
-      schema: table.schema,
-      table: table.name,
-      title: "Row Level Security is disabled",
-      detail: `${qualifiedName(table)} can be read or changed according to table privileges without row-level policy checks.`,
-      recommendation: "Enable RLS and add least-privilege policies for each application role.",
-      suggestedSql: [
-        `alter table ${quoteQualifiedName(table)} enable row level security;`,
-        `-- Then add policies that match your access model before exposing this table to client roles.`
-      ]
-    });
+    const exposure = findTableExposure(table, privileges, roleGraph);
+    findings.push(
+      exposure
+        ? {
+            id: "rls-disabled-exposed",
+            severity: "high",
+            schema: table.schema,
+            table: table.name,
+            title: "RLS-disabled table is reachable by an application role",
+            detail: `${qualifiedName(table)} has no row-level checks; ${exposure}.`,
+            recommendation: "Enable RLS and add least-privilege policies for each application role.",
+            suggestedSql: enableRlsSql(table)
+          }
+        : {
+            id: "rls-disabled",
+            severity: "medium",
+            schema: table.schema,
+            table: table.name,
+            title: "Row Level Security is disabled",
+            detail: `${qualifiedName(table)} has no row-level policy enforcement. No reachable application table privilege was found in this catalog snapshot.`,
+            recommendation: "Enable RLS before granting this table to an application-facing role.",
+            suggestedSql: enableRlsSql(table)
+          }
+    );
 
     return tableAudit(table, policies, findings);
   }
@@ -107,10 +162,25 @@ function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudi
       schema: table.schema,
       table: table.name,
       title: "FORCE ROW LEVEL SECURITY is disabled",
-      detail: "Table owners and privileged sessions can bypass RLS unless FORCE RLS is enabled.",
+      detail: "The table owner bypasses RLS while FORCE RLS is disabled. Superusers and BYPASSRLS roles bypass RLS regardless of FORCE RLS.",
       recommendation: "Enable FORCE RLS for sensitive multi-tenant tables after confirming owner-side maintenance workflows.",
       suggestedSql: [`alter table ${quoteQualifiedName(table)} force row level security;`]
     });
+  }
+
+  if (!table.forceRls && table.owner) {
+    const ownerAccess = findBestAccess(roleGraph, table.owner);
+    if (ownerAccess) {
+      findings.push({
+        id: "rls-bypass-role",
+        severity: "high",
+        schema: table.schema,
+        table: table.name,
+        title: "Application role can exercise the table owner",
+        detail: `${formatAccess(ownerAccess)} can exercise owner ${table.owner} and bypass RLS on ${qualifiedName(table)} because FORCE RLS is disabled.`,
+        recommendation: "Remove the application-to-owner role path or enable FORCE RLS after reviewing maintenance workflows."
+      });
+    }
   }
 
   for (const policy of policies) {
@@ -351,7 +421,218 @@ function suggestedWritePolicySql(table: TableSnapshot, policy: PolicySnapshot): 
   return sql;
 }
 
-function summarize(tables: TableAudit[], policyCount: number): AuditSummary {
+function buildRoleGraph(
+  snapshot: CatalogSnapshot,
+  roles: RoleSnapshot[],
+  memberships: RoleMembershipSnapshot[]
+): RoleGraph {
+  const identityNames = new Set<string>(["anon", "anonymous", "authenticated"]);
+  for (const role of roles) identityNames.add(role.name);
+  for (const membership of memberships) {
+    identityNames.add(membership.role);
+    identityNames.add(membership.member);
+  }
+  for (const privilege of snapshot.relationPrivileges ?? []) identityNames.add(privilege.grantee);
+  for (const privilege of snapshot.defaultPrivileges ?? []) identityNames.add(privilege.grantee);
+  for (const table of snapshot.tables) if (table.owner) identityNames.add(table.owner);
+
+  const membershipsByMember = new Map<string, RoleMembershipSnapshot[]>();
+  for (const membership of memberships) {
+    const existing = membershipsByMember.get(membership.member) ?? [];
+    existing.push(membership);
+    membershipsByMember.set(membership.member, existing);
+  }
+  for (const edges of membershipsByMember.values()) {
+    edges.sort((left, right) =>
+      left.role.localeCompare(right.role) || left.member.localeCompare(right.member)
+    );
+  }
+
+  return {
+    applicationRoles: [...identityNames]
+      .filter((name) => name !== "PUBLIC" && isApplicationRole(name))
+      .sort((left, right) => left.localeCompare(right)),
+    rolesByName: new Map(roles.map((role) => [role.name, role])),
+    membershipsByMember
+  };
+}
+
+function isApplicationRole(role: string): boolean {
+  return applicationRoleNames.has(role.toLowerCase());
+}
+
+function findBestAccess(graph: RoleGraph, targetRole: string): RoleAccess | undefined {
+  const accesses: RoleAccess[] = [];
+  for (const applicationRole of graph.applicationRoles) {
+    if (applicationRole === targetRole) {
+      accesses.push({ applicationRole, targetRole, mode: "direct" });
+      continue;
+    }
+    if (canReachRole(graph, applicationRole, targetRole, "inherited")) {
+      accesses.push({ applicationRole, targetRole, mode: "inherited" });
+    } else if (canReachRole(graph, applicationRole, targetRole, "set-role")) {
+      accesses.push({ applicationRole, targetRole, mode: "set-role" });
+    }
+  }
+
+  return accesses.sort(compareRoleAccess)[0];
+}
+
+function canReachRole(
+  graph: RoleGraph,
+  sourceRole: string,
+  targetRole: string,
+  mode: Exclude<AccessMode, "direct">
+): boolean {
+  const queue = [sourceRole];
+  const visited = new Set<string>(queue);
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const member = queue[index]!;
+    const memberCanInherit = graph.rolesByName.get(member)?.inherits !== false;
+    for (const membership of graph.membershipsByMember.get(member) ?? []) {
+      const enabled =
+        mode === "inherited"
+          ? membership.inheritOption && memberCanInherit
+          : membership.setOption;
+      if (!enabled) continue;
+      if (membership.role === targetRole) return true;
+      if (!visited.has(membership.role)) {
+        visited.add(membership.role);
+        queue.push(membership.role);
+      }
+    }
+  }
+
+  return false;
+}
+
+function compareRoleAccess(left: RoleAccess, right: RoleAccess): number {
+  const modeRank: Record<AccessMode, number> = { direct: 0, inherited: 1, "set-role": 2 };
+  return (
+    modeRank[left.mode] - modeRank[right.mode] ||
+    left.applicationRole.localeCompare(right.applicationRole) ||
+    left.targetRole.localeCompare(right.targetRole)
+  );
+}
+
+function formatAccess(access: RoleAccess): string {
+  if (access.mode === "direct") return `Application role ${access.applicationRole}`;
+  if (access.mode === "inherited") {
+    return `Application role ${access.applicationRole} reaches ${access.targetRole} through inherited membership`;
+  }
+  return `Application role ${access.applicationRole} reaches ${access.targetRole} through SET ROLE`;
+}
+
+function findTableExposure(
+  table: TableSnapshot,
+  privileges: RelationPrivilegeSnapshot[],
+  roleGraph: RoleGraph
+): string | undefined {
+  const candidates: Array<{ privilege: string; grantee: string; access?: RoleAccess }> = [];
+  for (const privilege of privileges) {
+    if (!rowAccessPrivileges.has(privilege.privilege)) continue;
+    if (privilege.grantee === "PUBLIC") {
+      candidates.push({ privilege: privilege.privilege, grantee: privilege.grantee });
+      continue;
+    }
+    const access = findBestAccess(roleGraph, privilege.grantee);
+    if (access) candidates.push({ privilege: privilege.privilege, grantee: privilege.grantee, access });
+  }
+
+  if (table.owner) {
+    const access = findBestAccess(roleGraph, table.owner);
+    if (access) candidates.push({ privilege: "owner privileges", grantee: table.owner, access });
+  }
+
+  const candidate = candidates.sort((left, right) =>
+    left.grantee.localeCompare(right.grantee) || left.privilege.localeCompare(right.privilege)
+  )[0];
+  if (!candidate) return undefined;
+  if (!candidate.access) return `PUBLIC has ${candidate.privilege}`;
+  return `${formatAccess(candidate.access)} and can exercise ${candidate.privilege} granted to ${candidate.grantee}`;
+}
+
+function enableRlsSql(table: TableSnapshot): string[] {
+  return [
+    `alter table ${quoteQualifiedName(table)} enable row level security;`,
+    "-- Then add policies that match your access model before exposing this table to client roles."
+  ];
+}
+
+function auditDefaultPrivileges(
+  privileges: DefaultPrivilegeSnapshot[],
+  roleGraph: RoleGraph
+): SchemaFinding[] {
+  const findings = new Map<string, SchemaFinding>();
+  for (const privilege of privileges) {
+    const isPublic = privilege.grantee === "PUBLIC";
+    const access = isPublic ? undefined : findBestAccess(roleGraph, privilege.grantee);
+    if (!isPublic && !access) continue;
+
+    const schemaContext = privilege.schema ?? "all schemas";
+    const routeContext = isPublic ? "applies to every role" : formatAccess(access!);
+    const finding: SchemaFinding = {
+      id: "broad-default-table-privilege",
+      severity: defaultPrivilegeSeverity(privilege.privilege),
+      schema: privilege.schema,
+      title: "Broad default table privilege",
+      detail: `Owner ${privilege.owner} defaults in ${schemaContext} grant grantee ${privilege.grantee} privilege ${privilege.privilege}; ${routeContext}. Future tables can become application-accessible without an explicit table grant.`,
+      recommendation: "Revoke the broad default privilege and grant only the table privileges required by each application role."
+    };
+    const key = [
+      privilege.schema ?? "",
+      privilege.owner,
+      privilege.grantee,
+      privilege.privilege,
+      finding.id
+    ].join("\u0000");
+    findings.set(key, finding);
+  }
+  return [...findings.values()];
+}
+
+function defaultPrivilegeSeverity(privilege: string): Severity {
+  if (["INSERT", "UPDATE", "DELETE", "TRUNCATE"].includes(privilege)) return "high";
+  if (privilege === "SELECT") return "medium";
+  return "low";
+}
+
+function auditBypassRoles(roles: RoleSnapshot[], roleGraph: RoleGraph): SchemaFinding[] {
+  const findings: SchemaFinding[] = [];
+  for (const role of roles) {
+    if (!role.superuser && !role.bypassRls) continue;
+    const access = findBestAccess(roleGraph, role.name);
+    if (!access) continue;
+    const attributes = [role.superuser ? "SUPERUSER" : "", role.bypassRls ? "BYPASSRLS" : ""]
+      .filter(Boolean)
+      .join(" and ");
+    findings.push({
+      id: "rls-bypass-role",
+      severity: "high",
+      schema: null,
+      title: "Application role can reach an RLS-bypass role",
+      detail: `${formatAccess(access)}. Role ${role.name} has ${attributes} and bypasses row-level security even when FORCE RLS is enabled.`,
+      recommendation: "Remove application membership paths to privileged roles and use isolated server-side credentials for administrative work."
+    });
+  }
+  return findings;
+}
+
+function compareSchemaFindings(left: SchemaFinding, right: SchemaFinding): number {
+  return (
+    severityRank[right.severity] - severityRank[left.severity] ||
+    (left.schema ?? "").localeCompare(right.schema ?? "") ||
+    left.detail.localeCompare(right.detail) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function summarize(
+  tables: TableAudit[],
+  schemaFindings: SchemaFinding[],
+  policyCount: number
+): AuditSummary {
   const findings: Record<Severity, number> = {
     info: 0,
     low: 0,
@@ -364,6 +645,10 @@ function summarize(tables: TableAudit[], policyCount: number): AuditSummary {
     for (const finding of table.findings) {
       findings[finding.severity] += 1;
     }
+  }
+
+  for (const finding of schemaFindings) {
+    findings[finding.severity] += 1;
   }
 
   const highestSeverity = [...severityOrder]
@@ -388,6 +673,19 @@ function groupPoliciesByTable(policies: PolicySnapshot[]): Map<string, PolicySna
     grouped.set(key, existing);
   }
 
+  return grouped;
+}
+
+function groupPrivilegesByTable(
+  privileges: RelationPrivilegeSnapshot[]
+): Map<string, RelationPrivilegeSnapshot[]> {
+  const grouped = new Map<string, RelationPrivilegeSnapshot[]>();
+  for (const privilege of privileges) {
+    const key = tableKey(privilege.schema, privilege.table);
+    const existing = grouped.get(key) ?? [];
+    existing.push(privilege);
+    grouped.set(key, existing);
+  }
   return grouped;
 }
 

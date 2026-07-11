@@ -190,6 +190,42 @@ describe("public snapshot compatibility", () => {
 });
 
 describe("filterRelevantRoleTopology", () => {
+  it("retains standalone application paths to bypass roles and prunes unrelated components", () => {
+    const roles = [
+      { name: "Authenticated", superuser: false, bypassRls: false, inherits: true },
+      { name: "admin", superuser: true, bypassRls: false, inherits: true },
+      { name: "service", superuser: false, bypassRls: true, inherits: true },
+      { name: "unrelated_a", superuser: false, bypassRls: false, inherits: true },
+      { name: "unrelated_b", superuser: false, bypassRls: false, inherits: true }
+    ];
+    const roleMemberships = [
+      {
+        role: "admin",
+        member: "Authenticated",
+        inheritOption: false,
+        setOption: true
+      },
+      {
+        role: "unrelated_b",
+        member: "unrelated_a",
+        inheritOption: true,
+        setOption: true
+      }
+    ];
+
+    const result = filterRelevantRoleTopology({
+      tables: [],
+      policies: [],
+      relationPrivileges: [],
+      defaultPrivileges: [],
+      roles,
+      roleMemberships
+    });
+
+    expect(result.roles.map((role) => role.name)).toEqual(["Authenticated", "admin", "service"]);
+    expect(result.roleMemberships).toEqual(roleMemberships.slice(0, 1));
+  });
+
   it("seeds owners, policy roles, and privilege identities but not PUBLIC", () => {
     const role = (name: string) => ({
       name,

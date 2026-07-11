@@ -32,7 +32,7 @@ try {
   ]);
 
   assertIncludes(check.stdout, "highest risk CRITICAL");
-  assertIncludes(check.stdout, "[HIGH] Row Level Security is disabled");
+  assertIncludes(check.stdout, "[MEDIUM] Row Level Security is disabled");
   assertIncludes(check.stdout, "[CRITICAL] Anonymous-style role can write rows too broadly");
 
   const explain = await runCli([

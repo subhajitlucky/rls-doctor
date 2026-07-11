@@ -268,6 +268,15 @@ export function filterRelevantRoleTopology(snapshot: CatalogSnapshot): {
 function seedRelevantRoleNames(snapshot: CatalogSnapshot): Set<string> {
   const names = new Set<string>();
 
+  for (const role of snapshot.roles ?? []) {
+    const applicationFacing =
+      role.name !== "PUBLIC" &&
+      ["anon", "anonymous", "authenticated"].includes(role.name.toLowerCase());
+    if (applicationFacing || role.superuser || role.bypassRls) {
+      names.add(role.name);
+    }
+  }
+
   for (const table of snapshot.tables) {
     if (table.owner) names.add(table.owner);
   }
