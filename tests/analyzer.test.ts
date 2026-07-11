@@ -2,13 +2,22 @@ import { describe, expect, it } from "vitest";
 import { analyzeCatalog, getTableAudit, shouldFail } from "../src/audit/analyzer.js";
 import type { CatalogSnapshot, PolicySnapshot } from "../src/audit/types.js";
 
+function emptyCatalogFacts(): Pick<
+  CatalogSnapshot,
+  "relationPrivileges" | "defaultPrivileges" | "roles" | "roleMemberships"
+> {
+  return { relationPrivileges: [], defaultPrivileges: [], roles: [], roleMemberships: [] };
+}
+
 function analyzePolicy(policy: Omit<PolicySnapshot, "schema" | "table" | "name" | "permissive">) {
   return analyzeCatalog(
     {
+      ...emptyCatalogFacts(),
       tables: [
         {
           schema: "public",
           name: "documents",
+          owner: "postgres",
           rlsEnabled: true,
           forceRls: true,
           isPartitioned: false,
@@ -40,10 +49,12 @@ function compositionFindings(findings: ReturnType<typeof analyzePolicy>) {
 function analyzePolicies(policies: Array<Omit<PolicySnapshot, "schema" | "table">>) {
   return analyzeCatalog(
     {
+      ...emptyCatalogFacts(),
       tables: [
         {
           schema: "public",
           name: "documents",
+          owner: "postgres",
           rlsEnabled: true,
           forceRls: true,
           isPartitioned: false,
@@ -64,10 +75,12 @@ describe("analyzeCatalog", () => {
   it("flags tables where RLS is disabled", () => {
     const report = analyzeCatalog(
       {
+        ...emptyCatalogFacts(),
         tables: [
           {
             schema: "public",
             name: "orders",
+            owner: "postgres",
             rlsEnabled: false,
             forceRls: false,
             isPartitioned: false,
@@ -86,10 +99,12 @@ describe("analyzeCatalog", () => {
 
   it("flags public unconditional read and write policies", () => {
     const snapshot: CatalogSnapshot = {
+      ...emptyCatalogFacts(),
       tables: [
         {
           schema: "public",
           name: "profiles",
+          owner: "postgres",
           rlsEnabled: true,
           forceRls: false,
           isPartitioned: false,
@@ -132,10 +147,12 @@ describe("analyzeCatalog", () => {
   it("does not mark scoped authenticated policies as high risk", () => {
     const report = analyzeCatalog(
       {
+        ...emptyCatalogFacts(),
         tables: [
           {
             schema: "public",
             name: "tasks",
+            owner: "postgres",
             rlsEnabled: true,
             forceRls: true,
             isPartitioned: false,
@@ -167,7 +184,7 @@ describe("analyzeCatalog", () => {
 
   it("represents an empty catalog as clean", () => {
     const report = analyzeCatalog(
-      { tables: [], policies: [] },
+      { ...emptyCatalogFacts(), tables: [], policies: [] },
       { schemas: ["public"] }
     );
 
@@ -510,10 +527,12 @@ describe("shouldFail", () => {
   it("compares highest severity with the configured threshold", () => {
     const report = analyzeCatalog(
       {
+        ...emptyCatalogFacts(),
         tables: [
           {
             schema: "public",
             name: "events",
+            owner: "postgres",
             rlsEnabled: false,
             forceRls: false,
             isPartitioned: false,
@@ -536,10 +555,12 @@ describe("getTableAudit", () => {
   it("finds a table audit by qualified name", () => {
     const report = analyzeCatalog(
       {
+        ...emptyCatalogFacts(),
         tables: [
           {
             schema: "public",
             name: "profiles",
+            owner: "postgres",
             rlsEnabled: true,
             forceRls: true,
             isPartitioned: false,
@@ -557,10 +578,12 @@ describe("getTableAudit", () => {
   it("treats unqualified table names as public schema names", () => {
     const report = analyzeCatalog(
       {
+        ...emptyCatalogFacts(),
         tables: [
           {
             schema: "public",
             name: "profiles",
+            owner: "postgres",
             rlsEnabled: true,
             forceRls: true,
             isPartitioned: false,

@@ -4,13 +4,53 @@ export type HighestSeverity = Severity | "none";
 
 export type PolicyCommand = "ALL" | "SELECT" | "INSERT" | "UPDATE" | "DELETE";
 
+export type RelationPrivilege =
+  | "SELECT"
+  | "INSERT"
+  | "UPDATE"
+  | "DELETE"
+  | "TRUNCATE"
+  | "REFERENCES"
+  | "TRIGGER";
+
 export interface TableSnapshot {
   schema: string;
   name: string;
+  owner: string;
   rlsEnabled: boolean;
   forceRls: boolean;
   isPartitioned: boolean;
   estimatedRows: number | null;
+}
+
+export interface RelationPrivilegeSnapshot {
+  schema: string;
+  table: string;
+  grantor: string;
+  grantee: string;
+  privilege: RelationPrivilege;
+  grantable: boolean;
+}
+
+export interface DefaultPrivilegeSnapshot {
+  schema: string | null;
+  owner: string;
+  grantee: string;
+  objectType: "TABLE";
+  privilege: string;
+  grantable: boolean;
+}
+
+export interface RoleSnapshot {
+  name: string;
+  superuser: boolean;
+  bypassRls: boolean;
+  inherits: boolean;
+}
+
+export interface RoleMembershipSnapshot {
+  role: string;
+  member: string;
 }
 
 export interface PolicySnapshot {
@@ -27,6 +67,10 @@ export interface PolicySnapshot {
 export interface CatalogSnapshot {
   tables: TableSnapshot[];
   policies: PolicySnapshot[];
+  relationPrivileges: RelationPrivilegeSnapshot[];
+  defaultPrivileges: DefaultPrivilegeSnapshot[];
+  roles: RoleSnapshot[];
+  roleMemberships: RoleMembershipSnapshot[];
 }
 
 export interface Finding {

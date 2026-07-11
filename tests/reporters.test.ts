@@ -1,16 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { analyzeCatalog } from "../src/audit/analyzer.js";
+import type { CatalogSnapshot } from "../src/audit/types.js";
 import { renderJsonReport } from "../src/reporters/json.js";
 import { renderExplainReport } from "../src/reporters/text.js";
 import { renderTextReport } from "../src/reporters/text.js";
 
+const emptyCatalogFacts: Pick<
+  CatalogSnapshot,
+  "relationPrivileges" | "defaultPrivileges" | "roles" | "roleMemberships"
+> = { relationPrivileges: [], defaultPrivileges: [], roles: [], roleMemberships: [] };
+
 describe("reporters", () => {
   const report = analyzeCatalog(
     {
+      ...emptyCatalogFacts,
       tables: [
         {
           schema: "public",
           name: "orders",
+          owner: "postgres",
           rlsEnabled: false,
           forceRls: false,
           isPartitioned: false,
@@ -24,10 +32,12 @@ describe("reporters", () => {
 
   const cleanReport = analyzeCatalog(
     {
+      ...emptyCatalogFacts,
       tables: [
         {
           schema: "public",
           name: "tasks",
+          owner: "postgres",
           rlsEnabled: true,
           forceRls: true,
           isPartitioned: false,
