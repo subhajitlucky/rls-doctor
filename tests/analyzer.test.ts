@@ -33,6 +33,29 @@ function findingSignatures(findings: ReturnType<typeof analyzePolicy>) {
   return findings.map(({ id, severity }) => ({ id, severity }));
 }
 
+function analyzePolicies(policies: Array<Omit<PolicySnapshot, "schema" | "table">>) {
+  return analyzeCatalog(
+    {
+      tables: [
+        {
+          schema: "public",
+          name: "documents",
+          rlsEnabled: true,
+          forceRls: true,
+          isPartitioned: false,
+          estimatedRows: null
+        }
+      ],
+      policies: policies.map((policy) => ({
+        schema: "public",
+        table: "documents",
+        ...policy
+      }))
+    },
+    { schemas: ["public"] }
+  ).tables[0]!.findings;
+}
+
 describe("analyzeCatalog", () => {
   it("flags tables where RLS is disabled", () => {
     const report = analyzeCatalog(
@@ -262,6 +285,103 @@ describe("analyzeCatalog", () => {
         "  using ((select auth.uid()) = <owner_column>)",
         "  with check ((select auth.uid()) = <owner_column>);"
       ]);
+    });
+  });
+
+  describe("permissive policy composition", () => {
+    it("warns when multiple permissive policies apply to the same public-like role and command", () => {
+      const findings = analyzePolicies([
+        {
+          name: "published documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["anon"],
+          usingExpression: "published_at is not null",
+          checkExpression: null
+        },
+        {
+          name: "shared documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["anon"],
+          usingExpression: "share_token is not null",
+          checkExpression: null
+        }
+      ]);
+
+      const compositionFinding = findings.find(
+        (finding) => finding.id === "multiple-permissive-policies"
+      );
+
+      expect(compositionFinding).toMatchObject({ severity: "medium" });
+      expect(compositionFinding?.detail).toContain("anon");
+      expect(compositionFinding?.detail).toContain("SELECT");
+      expect(compositionFinding?.detail).toContain('"published documents"');
+      expect(compositionFinding?.detail).toContain('"shared documents"');
+      expect(compositionFinding?.detail).toContain("OR-combined");
+    });
+
+    it("does not warn when permissive policies apply to unrelated commands", () => {
+      const findings = analyzePolicies([
+        {
+          name: "read documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["authenticated"],
+          usingExpression: "owner_id = auth.uid()",
+          checkExpression: null
+        },
+        {
+          name: "update documents",
+          command: "UPDATE",
+          permissive: true,
+          roles: ["authenticated"],
+          usingExpression: "owner_id = auth.uid()",
+          checkExpression: "owner_id = auth.uid()"
+        }
+      ]);
+
+      expect(findings).not.toContainEqual(
+        expect.objectContaining({ id: "multiple-permissive-policies" })
+      );
+    });
+
+    it("accounts for a restrictive policy as an AND-combined constraint", () => {
+      const findings = analyzePolicies([
+        {
+          name: "owned documents",
+          command: "SELECT",
+          permissive: true,
+          roles: ["authenticated"],
+          usingExpression: "owner_id = auth.uid()",
+          checkExpression: null
+        },
+        {
+          name: "team documents",
+          command: "ALL",
+          permissive: true,
+          roles: ["authenticated"],
+          usingExpression: "team_id = current_team_id()",
+          checkExpression: "team_id = current_team_id()"
+        },
+        {
+          name: "active accounts only",
+          command: "ALL",
+          permissive: false,
+          roles: ["authenticated"],
+          usingExpression: "account_is_active()",
+          checkExpression: "account_is_active()"
+        }
+      ]);
+
+      const compositionFindings = findings.filter(
+        (finding) => finding.id === "multiple-permissive-policies"
+      );
+
+      expect(compositionFindings).toHaveLength(1);
+      expect(compositionFindings[0]).toMatchObject({ severity: "low" });
+      expect(compositionFindings[0]?.detail).toContain('Restrictive policy "active accounts only"');
+      expect(compositionFindings[0]?.detail).toContain("AND-combined");
     });
   });
 });

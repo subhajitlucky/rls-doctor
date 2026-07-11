@@ -4,6 +4,7 @@ import type {
   AuditSummary,
   CatalogSnapshot,
   Finding,
+  PolicyCommand,
   PolicySnapshot,
   Severity,
   TableAudit,
@@ -116,7 +117,93 @@ function auditTable(table: TableSnapshot, policies: PolicySnapshot[]): TableAudi
     findings.push(...auditPolicy(table, policy));
   }
 
+  findings.push(...auditPolicyComposition(table, policies));
+
   return tableAudit(table, policies, findings);
+}
+
+const concreteCommands: Exclude<PolicyCommand, "ALL">[] = [
+  "SELECT",
+  "INSERT",
+  "UPDATE",
+  "DELETE"
+];
+
+interface PolicyCompositionGroup {
+  role: string;
+  command: Exclude<PolicyCommand, "ALL">;
+  permissive: Map<string, PolicySnapshot>;
+  restrictive: Map<string, PolicySnapshot>;
+}
+
+function auditPolicyComposition(table: TableSnapshot, policies: PolicySnapshot[]): Finding[] {
+  const groups = new Map<string, PolicyCompositionGroup>();
+
+  for (const policy of policies) {
+    const commands = policy.command === "ALL" ? concreteCommands : [policy.command];
+
+    for (const role of new Set(policy.roles.map((policyRole) => policyRole.toLowerCase()))) {
+      for (const command of commands) {
+        const key = `${role}\u0000${command}`;
+        const group = groups.get(key) ?? {
+          role,
+          command,
+          permissive: new Map<string, PolicySnapshot>(),
+          restrictive: new Map<string, PolicySnapshot>()
+        };
+        const policiesByKind = policy.permissive ? group.permissive : group.restrictive;
+        policiesByKind.set(policy.name, policy);
+        groups.set(key, group);
+      }
+    }
+  }
+
+  return [...groups.values()]
+    .filter((group) => group.permissive.size > 1)
+    .sort(compareCompositionGroups)
+    .map((group) => compositionFinding(table, group));
+}
+
+function compareCompositionGroups(left: PolicyCompositionGroup, right: PolicyCompositionGroup): number {
+  const roleComparison = left.role.localeCompare(right.role);
+  if (roleComparison !== 0) {
+    return roleComparison;
+  }
+
+  return concreteCommands.indexOf(left.command) - concreteCommands.indexOf(right.command);
+}
+
+function compositionFinding(table: TableSnapshot, group: PolicyCompositionGroup): Finding {
+  const permissiveNames = [...group.permissive.keys()].sort((a, b) => a.localeCompare(b));
+  const restrictiveNames = [...group.restrictive.keys()].sort((a, b) => a.localeCompare(b));
+  const restrictiveContext = restrictivePolicyContext(restrictiveNames);
+
+  return {
+    id: "multiple-permissive-policies",
+    severity: publicLikeRoles.has(group.role) ? "medium" : "low",
+    schema: table.schema,
+    table: table.name,
+    title: "Multiple permissive policies combine for one role and command",
+    detail: `Role ${group.role} has ${permissiveNames.length} permissive policies for ${group.command}: ${formatPolicyNames(permissiveNames)}. Their predicates are OR-combined.${restrictiveContext}`,
+    recommendation:
+      "Review the policies together and confirm that access allowed by any permissive policy is intended."
+  };
+}
+
+function restrictivePolicyContext(policyNames: string[]): string {
+  if (policyNames.length === 0) {
+    return "";
+  }
+
+  if (policyNames.length === 1) {
+    return ` Restrictive policy ${formatPolicyNames(policyNames)} is AND-combined with the permissive result.`;
+  }
+
+  return ` Restrictive policies ${formatPolicyNames(policyNames)} are AND-combined with the permissive result.`;
+}
+
+function formatPolicyNames(policyNames: string[]): string {
+  return policyNames.map((name) => `"${name}"`).join(", ");
 }
 
 function auditPolicy(table: TableSnapshot, policy: PolicySnapshot): Finding[] {
