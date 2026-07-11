@@ -53,7 +53,7 @@ export function renderTextReport(report: AuditReport): string {
 function renderSchemaFinding(finding: SchemaFinding): string {
   const lines = [
     `  [${severityLabel[finding.severity]}] ${finding.title}`,
-    `    Scope: ${finding.schema ?? "all schemas / role level"}`,
+    `    Scope: ${finding.schema ?? "database-wide / role level"}`,
     `    ${finding.detail}`,
     `    Fix: ${finding.recommendation}`
   ];

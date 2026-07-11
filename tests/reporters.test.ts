@@ -143,4 +143,30 @@ describe("reporters", () => {
       severity: "high"
     });
   });
+
+  it("labels null-schema default privileges as owner-specific database-wide defaults", () => {
+    const schemaReport = analyzeCatalog(
+      {
+        ...emptyCatalogFacts,
+        tables: [],
+        policies: [],
+        defaultPrivileges: [
+          {
+            schema: null,
+            owner: "app_owner",
+            grantee: "PUBLIC",
+            objectType: "TABLE",
+            privilege: "SELECT",
+            grantable: false
+          }
+        ]
+      },
+      { schemas: ["public"] }
+    );
+    const text = renderTextReport(schemaReport);
+
+    expect(text).toContain("Scope: database-wide / role level");
+    expect(text).toContain("Database-wide defaults for owner app_owner");
+    expect(text).not.toContain("all schemas");
+  });
 });

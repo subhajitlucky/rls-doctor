@@ -168,21 +168,6 @@ function auditTable(
     });
   }
 
-  if (!table.forceRls && table.owner) {
-    const ownerAccess = findBestAccess(roleGraph, table.owner);
-    if (ownerAccess) {
-      findings.push({
-        id: "rls-bypass-role",
-        severity: "high",
-        schema: table.schema,
-        table: table.name,
-        title: "Application role can exercise the table owner",
-        detail: `${formatAccess(ownerAccess)} can exercise owner ${table.owner} and bypass RLS on ${qualifiedName(table)} because FORCE RLS is disabled.`,
-        recommendation: "Remove the application-to-owner role path or enable FORCE RLS after reviewing maintenance workflows."
-      });
-    }
-  }
-
   for (const policy of policies) {
     findings.push(...auditPolicy(table, policy));
   }
@@ -478,6 +463,18 @@ function findBestAccess(graph: RoleGraph, targetRole: string): RoleAccess | unde
   return accesses.sort(compareRoleAccess)[0];
 }
 
+function findBypassAccess(graph: RoleGraph, targetRole: string): RoleAccess | undefined {
+  const accesses: RoleAccess[] = [];
+  for (const applicationRole of graph.applicationRoles) {
+    if (applicationRole === targetRole) {
+      accesses.push({ applicationRole, targetRole, mode: "direct" });
+    } else if (canReachRole(graph, applicationRole, targetRole, "set-role")) {
+      accesses.push({ applicationRole, targetRole, mode: "set-role" });
+    }
+  }
+  return accesses.sort(compareRoleAccess)[0];
+}
+
 function canReachRole(
   graph: RoleGraph,
   sourceRole: string,
@@ -570,14 +567,16 @@ function auditDefaultPrivileges(
     const access = isPublic ? undefined : findBestAccess(roleGraph, privilege.grantee);
     if (!isPublic && !access) continue;
 
-    const schemaContext = privilege.schema ?? "all schemas";
     const routeContext = isPublic ? "applies to every role" : formatAccess(access!);
+    const defaultContext = privilege.schema
+      ? `Defaults for owner ${privilege.owner} in schema ${privilege.schema}`
+      : `Database-wide defaults for owner ${privilege.owner}`;
     const finding: SchemaFinding = {
       id: "broad-default-table-privilege",
       severity: defaultPrivilegeSeverity(privilege.privilege),
       schema: privilege.schema,
       title: "Broad default table privilege",
-      detail: `Owner ${privilege.owner} defaults in ${schemaContext} grant grantee ${privilege.grantee} privilege ${privilege.privilege}; ${routeContext}. Future tables can become application-accessible without an explicit table grant.`,
+      detail: `${defaultContext} grant grantee ${privilege.grantee} privilege ${privilege.privilege}; ${routeContext}. Future tables created by ${privilege.owner} can become application-accessible without an explicit table grant.`,
       recommendation: "Revoke the broad default privilege and grant only the table privileges required by each application role."
     };
     const key = [
@@ -602,7 +601,7 @@ function auditBypassRoles(roles: RoleSnapshot[], roleGraph: RoleGraph): SchemaFi
   const findings: SchemaFinding[] = [];
   for (const role of roles) {
     if (!role.superuser && !role.bypassRls) continue;
-    const access = findBestAccess(roleGraph, role.name);
+    const access = findBypassAccess(roleGraph, role.name);
     if (!access) continue;
     const attributes = [role.superuser ? "SUPERUSER" : "", role.bypassRls ? "BYPASSRLS" : ""]
       .filter(Boolean)

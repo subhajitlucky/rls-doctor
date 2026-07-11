@@ -336,14 +336,66 @@ describe("analyzeCatalog", () => {
       expect.objectContaining({ id: "broad-default-table-privilege", severity: "medium" }),
       expect.objectContaining({ id: "broad-default-table-privilege", severity: "low" })
     ]);
-    expect(report.schemaFindings[0]?.detail).toMatch(/app_owner.*all schemas.*writer.*UPDATE.*SET ROLE/i);
+    expect(report.schemaFindings[0]?.detail).toBe(
+      "Database-wide defaults for owner app_owner grant grantee writer privilege UPDATE; Application role authenticated reaches writer through SET ROLE. Future tables created by app_owner can become application-accessible without an explicit table grant."
+    );
     expect(report.schemaFindings[1]?.detail).toMatch(/postgres.*public.*PUBLIC.*SELECT/i);
     expect(report.schemaFindings[2]?.detail).toMatch(/postgres.*private.*anon.*TRIGGER/i);
     expect(report.summary.findings.high).toBe(1);
     expect(shouldFail(report, "high")).toBe(true);
   });
 
-  it("reports owner, superuser, and BYPASSRLS reachability with FORCE RLS semantics", () => {
+  it("does not treat inherited SUPERUSER or BYPASSRLS attributes as inherited bypass", () => {
+    const report = analyzeCatalog(
+      {
+        tables: [],
+        policies: [],
+        relationPrivileges: [],
+        defaultPrivileges: [],
+        roles: [
+          { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
+          { name: "admin", superuser: true, bypassRls: false, inherits: true },
+          { name: "service", superuser: false, bypassRls: true, inherits: true }
+        ],
+        roleMemberships: [
+          { role: "admin", member: "authenticated", inheritOption: true, setOption: false },
+          { role: "service", member: "anonymous", inheritOption: true, setOption: false }
+        ]
+      },
+      { schemas: ["public"] }
+    );
+
+    expect(report.schemaFindings).toEqual([]);
+    expect(report.summary.findings.high).toBe(0);
+  });
+
+  it("reports direct and SET ROLE access to SUPERUSER or BYPASSRLS roles", () => {
+    const report = analyzeCatalog(
+      {
+        tables: [],
+        policies: [],
+        relationPrivileges: [],
+        defaultPrivileges: [],
+        roles: [
+          { name: "authenticated", superuser: false, bypassRls: true, inherits: true },
+          { name: "admin", superuser: true, bypassRls: false, inherits: true }
+        ],
+        roleMemberships: [
+          { role: "admin", member: "anonymous", inheritOption: false, setOption: true }
+        ]
+      },
+      { schemas: ["public"] }
+    );
+
+    expect(report.schemaFindings).toHaveLength(2);
+    expect(report.schemaFindings.map((finding) => finding.detail).join("\n")).toMatch(/admin.*SET ROLE/i);
+    expect(report.schemaFindings.map((finding) => finding.detail).join("\n")).toMatch(
+      /Application role authenticated.*BYPASSRLS/i
+    );
+    expect(report.schemaFindings.map((finding) => finding.detail).join("\n")).toContain("FORCE RLS");
+  });
+
+  it("keeps reachable table-owner bypass as info when FORCE RLS is disabled", () => {
     const report = analyzeCatalog(
       {
         tables: [
@@ -355,45 +407,38 @@ describe("analyzeCatalog", () => {
             forceRls: false,
             isPartitioned: false,
             estimatedRows: null
-          },
-          {
-            schema: "public",
-            name: "forced_documents",
-            owner: "app_owner",
-            rlsEnabled: true,
-            forceRls: true,
-            isPartitioned: false,
-            estimatedRows: null
           }
         ],
-        policies: [],
+        policies: [
+          {
+            schema: "public",
+            table: "documents",
+            name: "owned documents",
+            command: "SELECT",
+            permissive: false,
+            roles: ["authenticated"],
+            usingExpression: "owner_id = auth.uid()",
+            checkExpression: null
+          }
+        ],
         relationPrivileges: [],
         defaultPrivileges: [],
         roles: [
           { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
-          { name: "app_owner", superuser: false, bypassRls: false, inherits: true },
-          { name: "admin", superuser: true, bypassRls: false, inherits: true },
-          { name: "service", superuser: false, bypassRls: true, inherits: true }
+          { name: "app_owner", superuser: false, bypassRls: false, inherits: true }
         ],
         roleMemberships: [
-          { role: "app_owner", member: "authenticated", inheritOption: true, setOption: true },
-          { role: "admin", member: "authenticated", inheritOption: false, setOption: true },
-          { role: "service", member: "anonymous", inheritOption: true, setOption: false }
+          { role: "app_owner", member: "authenticated", inheritOption: true, setOption: true }
         ]
       },
       { schemas: ["public"] }
     );
 
-    expect(report.tables[0]?.findings).toContainEqual(
-      expect.objectContaining({ id: "rls-bypass-role", severity: "high" })
-    );
-    expect(report.tables[1]?.findings).not.toContainEqual(
-      expect.objectContaining({ id: "rls-bypass-role" })
-    );
-    expect(report.schemaFindings).toHaveLength(2);
-    expect(report.schemaFindings.map((finding) => finding.detail).join("\n")).toMatch(/admin.*SET ROLE/i);
-    expect(report.schemaFindings.map((finding) => finding.detail).join("\n")).toMatch(/service.*inherited/i);
-    expect(report.schemaFindings.map((finding) => finding.detail).join("\n")).toContain("FORCE RLS");
+    expect(report.tables[0]?.findings).toEqual([
+      expect.objectContaining({ id: "force-rls-disabled", severity: "info" })
+    ]);
+    expect(report.summary.findings.high).toBe(0);
+    expect(shouldFail(report, "high")).toBe(false);
   });
 
   it("normalizes omitted legacy catalog facts to empty arrays", () => {
