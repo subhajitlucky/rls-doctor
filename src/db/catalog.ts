@@ -8,6 +8,7 @@ import type {
   RelationPrivilegeSnapshot,
   RoleMembershipSnapshot,
   RoleSnapshot,
+  SchemaPrivilegeSnapshot,
   TableSnapshot
 } from "../audit/types.js";
 
@@ -56,6 +57,15 @@ export interface DefaultPrivilegeRow {
   grantee_oid: string | number;
   grantee: string | null;
   object_type: string;
+  privilege: string;
+  grantable: boolean;
+}
+
+export interface SchemaPrivilegeRow {
+  schema: string;
+  grantor: string;
+  grantee_oid: string | number;
+  grantee: string | null;
   privilege: string;
   grantable: boolean;
 }
@@ -113,6 +123,9 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<CatalogS
     const relationPrivileges = await client.query<RelationPrivilegeRow>(relationPrivilegesSql, [
       options.schemas
     ]);
+    const schemaPrivileges = await client.query<SchemaPrivilegeRow>(schemaPrivilegesSql, [
+      options.schemas
+    ]);
     const defaultPrivileges = await client.query<DefaultPrivilegeRow>(defaultPrivilegesSql, [
       options.schemas
     ]);
@@ -133,6 +146,7 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<CatalogS
       tables: tables.rows.map(mapTable),
       policies: policies.rows.map(mapPolicy),
       relationPrivileges: relationPrivileges.rows.map(mapRelationPrivilege),
+      schemaPrivileges: schemaPrivileges.rows.map(mapSchemaPrivilege),
       defaultPrivileges: defaultPrivileges.rows.map(mapDefaultPrivilege),
       roles: roles.rows.map(mapRole),
       roleMemberships
@@ -191,6 +205,19 @@ export function mapDefaultPrivilege(row: DefaultPrivilegeRow): DefaultPrivilegeS
     owner: row.owner,
     grantee: normalizeGrantee(row.grantee_oid, row.grantee),
     objectType: row.object_type,
+    privilege: row.privilege,
+    grantable: row.grantable
+  };
+}
+
+export function mapSchemaPrivilege(row: SchemaPrivilegeRow): SchemaPrivilegeSnapshot {
+  if (row.privilege !== "USAGE" && row.privilege !== "CREATE") {
+    throw new Error(`Unexpected schema privilege: ${row.privilege}`);
+  }
+  return {
+    schema: row.schema,
+    grantor: row.grantor,
+    grantee: normalizeGrantee(row.grantee_oid, row.grantee),
     privilege: row.privilege,
     grantable: row.grantable
   };
@@ -294,6 +321,11 @@ function seedRelevantRoleNames(snapshot: CatalogSnapshot): Set<string> {
 
   for (const privilege of snapshot.defaultPrivileges ?? []) {
     names.add(privilege.owner);
+    if (privilege.grantee !== "PUBLIC") names.add(privilege.grantee);
+  }
+
+  for (const privilege of snapshot.schemaPrivileges ?? []) {
+    names.add(privilege.grantor);
     if (privilege.grantee !== "PUBLIC") names.add(privilege.grantee);
   }
 
@@ -417,6 +449,20 @@ const relationPrivilegesSql = `
   where c.relkind in ('r', 'p')
     and n.nspname = any($1::text[])
   order by n.nspname, c.relname, grantee, privilege, grantor;
+`;
+
+export const schemaPrivilegesSql = `
+  select
+    n.nspname as schema,
+    pg_get_userbyid(acl.grantor) as grantor,
+    acl.grantee::text as grantee_oid,
+    case when acl.grantee = 0 then null else pg_get_userbyid(acl.grantee) end as grantee,
+    acl.privilege_type as privilege,
+    acl.is_grantable as grantable
+  from pg_namespace n
+  cross join lateral aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) acl
+  where n.nspname = any($1::text[])
+  order by n.nspname, grantee, privilege, grantor;
 `;
 
 const defaultPrivilegesSql = `

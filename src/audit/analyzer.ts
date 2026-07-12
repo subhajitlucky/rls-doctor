@@ -10,6 +10,7 @@ import type {
   RelationPrivilegeSnapshot,
   RoleMembershipSnapshot,
   RoleSnapshot,
+  SchemaPrivilegeSnapshot,
   SchemaFinding,
   Severity,
   TableAudit,
@@ -27,7 +28,8 @@ const severityRank: Record<Severity, number> = {
 const severityOrder: Severity[] = ["info", "low", "medium", "high", "critical"];
 const publicLikeRoles = new Set(["public", "anon", "anonymous"]);
 const applicationRoleNames = new Set(["public", "anon", "anonymous", "authenticated"]);
-const rowAccessPrivileges = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]);
+const rowAccessPrivileges = new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]);
+const truncatePrivilege = new Set(["TRUNCATE"]);
 
 type AccessMode = "direct" | "inherited" | "set-role";
 
@@ -41,6 +43,14 @@ interface RoleGraph {
   applicationRoles: string[];
   rolesByName: Map<string, RoleSnapshot>;
   membershipsByMember: Map<string, RoleMembershipSnapshot[]>;
+  contextsByApplicationRole: Map<string, RoleContext[]>;
+}
+
+interface RoleContext {
+  applicationRole: string;
+  selectedRole: string;
+  effectiveRoles: Set<string>;
+  usedSetRole: boolean;
 }
 
 export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions): AuditReport {
@@ -48,6 +58,7 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
   const policiesByTable = groupPoliciesByTable(snapshot.policies);
   const relationPrivileges = snapshot.relationPrivileges ?? [];
   const defaultPrivileges = snapshot.defaultPrivileges ?? [];
+  const schemaPrivileges = snapshot.schemaPrivileges;
   const roles = snapshot.roles ?? [];
   const roleMemberships = snapshot.roleMemberships ?? [];
   const roleGraph = buildRoleGraph(snapshot, roles, roleMemberships);
@@ -62,7 +73,8 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
         table,
         policiesByTable.get(tableKey(table.schema, table.name)) ?? [],
         privilegesByTable.get(tableKey(table.schema, table.name)) ?? [],
-        roleGraph
+        roleGraph,
+        schemaPrivileges
       )
     )
     .sort((a, b) => `${a.schema}.${a.table}`.localeCompare(`${b.schema}.${b.table}`));
@@ -103,12 +115,37 @@ function auditTable(
   table: TableSnapshot,
   policies: PolicySnapshot[],
   privileges: RelationPrivilegeSnapshot[],
-  roleGraph: RoleGraph
+  roleGraph: RoleGraph,
+  schemaPrivileges: SchemaPrivilegeSnapshot[] | undefined
 ): TableAudit {
   const findings: Finding[] = [];
+  const truncateExposure = findTableExposure(
+    table,
+    privileges,
+    roleGraph,
+    schemaPrivileges,
+    truncatePrivilege
+  );
+  if (truncateExposure) {
+    findings.push({
+      id: "reachable-truncate",
+      severity: "high",
+      schema: table.schema,
+      table: table.name,
+      title: "TRUNCATE is reachable by an application role",
+      detail: `${qualifiedName(table)} can be truncated; ${truncateExposure}. RLS never protects TRUNCATE.`,
+      recommendation: "Revoke TRUNCATE from application-facing roles and grant it only to isolated maintenance roles."
+    });
+  }
 
   if (!table.rlsEnabled) {
-    const exposure = findTableExposure(table, privileges, roleGraph);
+    const exposure = findTableExposure(
+      table,
+      privileges,
+      roleGraph,
+      schemaPrivileges,
+      rowAccessPrivileges
+    );
     findings.push(
       exposure
         ? {
@@ -419,6 +456,7 @@ function buildRoleGraph(
   }
   for (const privilege of snapshot.relationPrivileges ?? []) identityNames.add(privilege.grantee);
   for (const privilege of snapshot.defaultPrivileges ?? []) identityNames.add(privilege.grantee);
+  for (const privilege of snapshot.schemaPrivileges ?? []) identityNames.add(privilege.grantee);
   for (const table of snapshot.tables) if (table.owner) identityNames.add(table.owner);
 
   const membershipsByMember = new Map<string, RoleMembershipSnapshot[]>();
@@ -433,13 +471,54 @@ function buildRoleGraph(
     );
   }
 
-  return {
-    applicationRoles: [...identityNames]
-      .filter((name) => name !== "PUBLIC" && isApplicationRole(name))
-      .sort((left, right) => left.localeCompare(right)),
+  const applicationRoles = [...identityNames]
+    .filter((name) => name !== "PUBLIC" && isApplicationRole(name))
+    .sort((left, right) => left.localeCompare(right));
+  const graph: RoleGraph = {
+    applicationRoles,
     rolesByName: new Map(roles.map((role) => [role.name, role])),
-    membershipsByMember
+    membershipsByMember,
+    contextsByApplicationRole: new Map()
   };
+  for (const applicationRole of applicationRoles) {
+    graph.contextsByApplicationRole.set(applicationRole, buildRoleContexts(graph, applicationRole));
+  }
+  return graph;
+}
+
+function buildRoleContexts(graph: RoleGraph, applicationRole: string): RoleContext[] {
+  const selectedRoles = [applicationRole];
+  const visited = new Set(selectedRoles);
+  for (let index = 0; index < selectedRoles.length; index += 1) {
+    for (const membership of graph.membershipsByMember.get(selectedRoles[index]!) ?? []) {
+      if (membership.setOption && !visited.has(membership.role)) {
+        visited.add(membership.role);
+        selectedRoles.push(membership.role);
+      }
+    }
+  }
+  return selectedRoles.map((selectedRole) => ({
+    applicationRole,
+    selectedRole,
+    effectiveRoles: inheritedClosure(graph, selectedRole),
+    usedSetRole: selectedRole !== applicationRole
+  }));
+}
+
+function inheritedClosure(graph: RoleGraph, sourceRole: string): Set<string> {
+  const queue = [sourceRole];
+  const visited = new Set(queue);
+  for (let index = 0; index < queue.length; index += 1) {
+    const member = queue[index]!;
+    if (graph.rolesByName.get(member)?.inherits === false) continue;
+    for (const membership of graph.membershipsByMember.get(member) ?? []) {
+      if (membership.inheritOption && !visited.has(membership.role)) {
+        visited.add(membership.role);
+        queue.push(membership.role);
+      }
+    }
+  }
+  return visited;
 }
 
 function isApplicationRole(role: string): boolean {
@@ -449,14 +528,12 @@ function isApplicationRole(role: string): boolean {
 function findBestAccess(graph: RoleGraph, targetRole: string): RoleAccess | undefined {
   const accesses: RoleAccess[] = [];
   for (const applicationRole of graph.applicationRoles) {
-    if (applicationRole === targetRole) {
-      accesses.push({ applicationRole, targetRole, mode: "direct" });
-      continue;
-    }
-    if (canReachRole(graph, applicationRole, targetRole, "inherited")) {
-      accesses.push({ applicationRole, targetRole, mode: "inherited" });
-    } else if (canReachRole(graph, applicationRole, targetRole, "set-role")) {
-      accesses.push({ applicationRole, targetRole, mode: "set-role" });
+    for (const context of graph.contextsByApplicationRole.get(applicationRole) ?? []) {
+      if (!context.effectiveRoles.has(targetRole)) continue;
+      const mode: AccessMode = context.usedSetRole
+        ? "set-role"
+        : applicationRole === targetRole ? "direct" : "inherited";
+      accesses.push({ applicationRole, targetRole, mode });
     }
   }
 
@@ -524,21 +601,25 @@ function formatAccess(access: RoleAccess): string {
 function findTableExposure(
   table: TableSnapshot,
   privileges: RelationPrivilegeSnapshot[],
-  roleGraph: RoleGraph
+  roleGraph: RoleGraph,
+  schemaPrivileges: SchemaPrivilegeSnapshot[] | undefined,
+  acceptedPrivileges: Set<string>
 ): string | undefined {
   const candidates: Array<{ privilege: string; grantee: string; access?: RoleAccess }> = [];
   for (const privilege of privileges) {
-    if (!rowAccessPrivileges.has(privilege.privilege)) continue;
+    if (!acceptedPrivileges.has(privilege.privilege)) continue;
     if (privilege.grantee === "PUBLIC") {
-      candidates.push({ privilege: privilege.privilege, grantee: privilege.grantee });
+      if (hasAnySchemaUsage(roleGraph, table.schema, schemaPrivileges)) {
+        candidates.push({ privilege: privilege.privilege, grantee: privilege.grantee });
+      }
       continue;
     }
-    const access = findBestAccess(roleGraph, privilege.grantee);
+    const access = findCompatibleAccess(roleGraph, privilege.grantee, table.schema, schemaPrivileges);
     if (access) candidates.push({ privilege: privilege.privilege, grantee: privilege.grantee, access });
   }
 
   if (table.owner) {
-    const access = findBestAccess(roleGraph, table.owner);
+    const access = findCompatibleAccess(roleGraph, table.owner, table.schema, schemaPrivileges);
     if (access) candidates.push({ privilege: "owner privileges", grantee: table.owner, access });
   }
 
@@ -548,6 +629,61 @@ function findTableExposure(
   if (!candidate) return undefined;
   if (!candidate.access) return `PUBLIC has ${candidate.privilege}`;
   return `${formatAccess(candidate.access)} and can exercise ${candidate.privilege} granted to ${candidate.grantee}`;
+}
+
+function findCompatibleAccess(
+  graph: RoleGraph,
+  targetRole: string,
+  schema: string,
+  schemaPrivileges: SchemaPrivilegeSnapshot[] | undefined
+): RoleAccess | undefined {
+  const accesses: RoleAccess[] = [];
+  for (const applicationRole of graph.applicationRoles) {
+    for (const context of graph.contextsByApplicationRole.get(applicationRole) ?? []) {
+      if (
+        !context.effectiveRoles.has(targetRole) ||
+        !contextHasSchemaUsage(context, schema, schemaPrivileges)
+      ) {
+        continue;
+      }
+      accesses.push({
+        applicationRole,
+        targetRole,
+        mode: context.usedSetRole
+          ? "set-role"
+          : applicationRole === targetRole
+            ? "direct"
+            : "inherited"
+      });
+    }
+  }
+  return accesses.sort(compareRoleAccess)[0];
+}
+
+function hasAnySchemaUsage(
+  graph: RoleGraph,
+  schema: string,
+  privileges: SchemaPrivilegeSnapshot[] | undefined
+): boolean {
+  return graph.applicationRoles.some((role) =>
+    (graph.contextsByApplicationRole.get(role) ?? []).some((context) =>
+      contextHasSchemaUsage(context, schema, privileges)
+    )
+  );
+}
+
+function contextHasSchemaUsage(
+  context: RoleContext,
+  schema: string,
+  privileges: SchemaPrivilegeSnapshot[] | undefined
+): boolean {
+  if (privileges === undefined) return true;
+  return privileges.some(
+    (privilege) =>
+      privilege.schema === schema &&
+      privilege.privilege === "USAGE" &&
+      (privilege.grantee === "PUBLIC" || context.effectiveRoles.has(privilege.grantee))
+  );
 }
 
 function enableRlsSql(table: TableSnapshot): string[] {
@@ -576,7 +712,7 @@ function auditDefaultPrivileges(
       severity: defaultPrivilegeSeverity(privilege.privilege),
       schema: privilege.schema,
       title: "Broad default table privilege",
-      detail: `${defaultContext} grant grantee ${privilege.grantee} privilege ${privilege.privilege}; ${routeContext}. Future tables created by ${privilege.owner} can become application-accessible without an explicit table grant.`,
+      detail: `${defaultContext} grant grantee ${privilege.grantee} privilege ${privilege.privilege}; ${routeContext}. Future tables created by ${privilege.owner} can receive this object privilege without an explicit table grant; actual access also requires schema USAGE.`,
       recommendation: "Revoke the broad default privilege and grant only the table privileges required by each application role."
     };
     const key = [

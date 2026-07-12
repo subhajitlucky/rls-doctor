@@ -41,6 +41,14 @@ export interface DefaultPrivilegeSnapshot {
   grantable: boolean;
 }
 
+export interface SchemaPrivilegeSnapshot {
+  schema: string;
+  grantor: string;
+  grantee: string;
+  privilege: "USAGE" | "CREATE";
+  grantable: boolean;
+}
+
 export interface RoleSnapshot {
   name: string;
   superuser: boolean;
@@ -71,6 +79,7 @@ export interface CatalogSnapshot {
   policies: PolicySnapshot[];
   relationPrivileges?: RelationPrivilegeSnapshot[];
   defaultPrivileges?: DefaultPrivilegeSnapshot[];
+  schemaPrivileges?: SchemaPrivilegeSnapshot[];
   roles?: RoleSnapshot[];
   roleMemberships?: RoleMembershipSnapshot[];
 }

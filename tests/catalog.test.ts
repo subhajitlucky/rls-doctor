@@ -6,8 +6,10 @@ import {
   mapRelationPrivilege,
   mapRole,
   mapRoleMembership,
+  mapSchemaPrivilege,
   mapTable,
-  normalizePolicyRoles
+  normalizePolicyRoles,
+  schemaPrivilegesSql
 } from "../src/db/catalog.js";
 import type {
   CatalogSnapshot as PublicCatalogSnapshot,
@@ -36,6 +38,11 @@ describe("normalizePolicyRoles", () => {
 });
 
 describe("catalog row mapping", () => {
+  it("queries selected schema ACLs with namespace defaults and stable ordering", () => {
+    expect(schemaPrivilegesSql).toContain("acldefault('n', n.nspowner)");
+    expect(schemaPrivilegesSql).toContain("n.nspname = any($1::text[])");
+    expect(schemaPrivilegesSql).toContain("order by n.nspname, grantee, privilege, grantor");
+  });
   it("maps relation privileges expanded from an existing relation ACL", () => {
     expect(
       mapRelationPrivilege({
@@ -54,6 +61,12 @@ describe("catalog row mapping", () => {
       grantee: "PUBLIC",
       privilege: "SELECT",
       grantable: false
+    });
+  });
+
+  it("maps schema privileges including PUBLIC", () => {
+    expect(mapSchemaPrivilege({ schema: "private", grantor: "Owner", grantee_oid: "0", grantee: null, privilege: "USAGE", grantable: false })).toEqual({
+      schema: "private", grantor: "Owner", grantee: "PUBLIC", privilege: "USAGE", grantable: false
     });
   });
 
@@ -180,6 +193,7 @@ describe("public snapshot compatibility", () => {
       RelationPrivilege?,
       RelationPrivilegeSnapshot?,
       DefaultPrivilegeSnapshot?,
+      import("../src/index.js").SchemaPrivilegeSnapshot?,
       RoleSnapshot?,
       RoleMembershipSnapshot?
     ] = [];
@@ -286,12 +300,17 @@ describe("filterRelevantRoleTopology", () => {
           grantable: false
         }
       ],
+      schemaPrivileges: [
+        { schema: "app", grantor: "schema_grantor", grantee: "schema_grantee", privilege: "USAGE", grantable: false }
+      ],
       roles: [
         role("default_grantee"),
         role("default_owner"),
         role("policy_role"),
         role("relation_grantee"),
         role("relation_grantor"),
+        role("schema_grantee"),
+        role("schema_grantor"),
         role("table_owner"),
         role("unrelated")
       ],
@@ -304,6 +323,8 @@ describe("filterRelevantRoleTopology", () => {
       "policy_role",
       "relation_grantee",
       "relation_grantor",
+      "schema_grantee",
+      "schema_grantor",
       "table_owner"
     ]);
   });

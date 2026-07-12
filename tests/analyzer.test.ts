@@ -72,6 +72,124 @@ function analyzePolicies(policies: Array<Omit<PolicySnapshot, "schema" | "table"
 }
 
 describe("analyzeCatalog", () => {
+  it("reaches relation grants through SET ROLE followed by inherited membership", () => {
+    const report = analyzeCatalog(
+      {
+        tables: [{ schema: "app", name: "orders", owner: "owner", rlsEnabled: false, forceRls: false, isPartitioned: false, estimatedRows: null }],
+        policies: [],
+        relationPrivileges: [{ schema: "app", table: "orders", grantor: "owner", grantee: "reader", privilege: "SELECT", grantable: false }],
+        defaultPrivileges: [],
+        roles: [
+          { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
+          { name: "switcher", superuser: false, bypassRls: false, inherits: true },
+          { name: "reader", superuser: false, bypassRls: false, inherits: true }
+        ],
+        roleMemberships: [
+          { role: "switcher", member: "authenticated", inheritOption: false, setOption: true },
+          { role: "reader", member: "switcher", inheritOption: true, setOption: false }
+        ]
+      },
+      { schemas: ["app"] }
+    );
+
+    expect(report.tables[0]?.findings[0]).toMatchObject({ id: "rls-disabled-exposed", severity: "high" });
+    expect(report.tables[0]?.findings[0]?.detail).toMatch(/SET ROLE.*reader/i);
+  });
+
+  it("requires schema USAGE in the same effective role context for grants and ownership", () => {
+    const base = {
+      tables: [{ schema: "private", name: "orders", owner: "owner", rlsEnabled: false, forceRls: false, isPartitioned: false, estimatedRows: null }],
+      policies: [],
+      relationPrivileges: [{ schema: "private", table: "orders", grantor: "owner", grantee: "reader", privilege: "SELECT" as const, grantable: false }],
+      defaultPrivileges: [],
+      roles: [
+        { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
+        { name: "switcher", superuser: false, bypassRls: false, inherits: true },
+        { name: "reader", superuser: false, bypassRls: false, inherits: true },
+        { name: "owner", superuser: false, bypassRls: false, inherits: true }
+      ],
+      roleMemberships: [
+        { role: "switcher", member: "authenticated", inheritOption: false, setOption: true },
+        { role: "reader", member: "switcher", inheritOption: true, setOption: false }
+      ]
+    };
+    const denied = analyzeCatalog({ ...base, schemaPrivileges: [] }, { schemas: ["private"] });
+    const granted = analyzeCatalog({
+      ...base,
+      schemaPrivileges: [{ schema: "private", grantor: "owner", grantee: "reader", privilege: "USAGE", grantable: false }]
+    }, { schemas: ["private"] });
+    const publicUsageOwner = analyzeCatalog({
+      ...base,
+      relationPrivileges: [],
+      roleMemberships: [{ role: "owner", member: "authenticated", inheritOption: false, setOption: true }],
+      schemaPrivileges: [{ schema: "private", grantor: "owner", grantee: "PUBLIC", privilege: "USAGE", grantable: false }]
+    }, { schemas: ["private"] });
+
+    expect(denied.tables[0]?.findings[0]).toMatchObject({ id: "rls-disabled", severity: "medium" });
+    expect(granted.tables[0]?.findings[0]).toMatchObject({ id: "rls-disabled-exposed", severity: "high" });
+    expect(publicUsageOwner.tables[0]?.findings.find(({ id }) => id === "rls-disabled-exposed")).toMatchObject({ severity: "high" });
+  });
+
+  it.each([
+    ["direct", "authenticated", []],
+    ["inherited", "reader", [{ role: "reader", member: "authenticated", inheritOption: true, setOption: false }]],
+    ["SET ROLE", "reader", [{ role: "reader", member: "authenticated", inheritOption: false, setOption: true }]]
+  ] as const)("accepts %s schema USAGE", (_mode, grantee, roleMemberships) => {
+    const report = analyzeCatalog({
+      tables: [
+        {
+          schema: "private",
+          name: "documents",
+          owner: "owner",
+          rlsEnabled: false,
+          forceRls: false,
+          isPartitioned: false,
+          estimatedRows: null
+        }
+      ],
+      policies: [],
+      relationPrivileges: [
+        {
+          schema: "private",
+          table: "documents",
+          grantor: "owner",
+          grantee,
+          privilege: "SELECT",
+          grantable: false
+        }
+      ],
+      schemaPrivileges: [
+        { schema: "private", grantor: "owner", grantee, privilege: "USAGE", grantable: false }
+      ],
+      defaultPrivileges: [],
+      roles: [
+        { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
+        { name: "reader", superuser: false, bypassRls: false, inherits: true }
+      ],
+      roleMemberships: [...roleMemberships]
+    }, { schemas: ["private"] });
+
+    expect(report.tables[0]?.findings[0]).toMatchObject({ id: "rls-disabled-exposed" });
+  });
+
+  it("audits reachable TRUNCATE independently of RLS and without duplicating general exposure", () => {
+    const make = (rlsEnabled: boolean, grantee: string) => analyzeCatalog({
+      tables: [{ schema: "app", name: "events", owner: "owner", rlsEnabled, forceRls: rlsEnabled, isPartitioned: false, estimatedRows: null }],
+      policies: [],
+      relationPrivileges: [{ schema: "app", table: "events", grantor: "owner", grantee, privilege: "TRUNCATE", grantable: false }],
+      schemaPrivileges: [{ schema: "app", grantor: "owner", grantee: "PUBLIC", privilege: "USAGE", grantable: false }],
+      defaultPrivileges: [],
+      roles: [{ name: "authenticated", superuser: false, bypassRls: false, inherits: true }, { name: "truncator", superuser: false, bypassRls: false, inherits: true }],
+      roleMemberships: [{ role: "truncator", member: "authenticated", inheritOption: true, setOption: false }]
+    }, { schemas: ["app"] });
+
+    for (const report of [make(true, "PUBLIC"), make(false, "truncator")]) {
+      expect(report.tables[0]?.findings.filter(({ id }) => id === "reachable-truncate")).toHaveLength(1);
+      expect(report.tables[0]?.findings.find(({ id }) => id === "reachable-truncate")).toMatchObject({ severity: "high" });
+    }
+    expect(make(false, "truncator").tables[0]?.findings.some(({ id }) => id === "rls-disabled-exposed")).toBe(false);
+  });
+
   it("keeps an ungranted internal RLS-disabled table as a medium advisory", () => {
     const report = analyzeCatalog(
       {
@@ -337,12 +455,36 @@ describe("analyzeCatalog", () => {
       expect.objectContaining({ id: "broad-default-table-privilege", severity: "low" })
     ]);
     expect(report.schemaFindings[0]?.detail).toBe(
-      "Database-wide defaults for owner app_owner grant grantee writer privilege UPDATE; Application role authenticated reaches writer through SET ROLE. Future tables created by app_owner can become application-accessible without an explicit table grant."
+      "Database-wide defaults for owner app_owner grant grantee writer privilege UPDATE; Application role authenticated reaches writer through SET ROLE. Future tables created by app_owner can receive this object privilege without an explicit table grant; actual access also requires schema USAGE."
     );
     expect(report.schemaFindings[1]?.detail).toMatch(/postgres.*public.*PUBLIC.*SELECT/i);
     expect(report.schemaFindings[2]?.detail).toMatch(/postgres.*private.*anon.*TRIGGER/i);
     expect(report.summary.findings.high).toBe(1);
     expect(shouldFail(report, "high")).toBe(true);
+  });
+
+  it("reaches default privileges and table ownership through SET then INHERIT", () => {
+    const topology = {
+      roles: [
+        { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
+        { name: "switcher", superuser: false, bypassRls: false, inherits: true },
+        { name: "target", superuser: false, bypassRls: false, inherits: true }
+      ],
+      roleMemberships: [
+        { role: "switcher", member: "authenticated", inheritOption: false, setOption: true },
+        { role: "target", member: "switcher", inheritOption: true, setOption: false }
+      ]
+    };
+    const report = analyzeCatalog({
+      tables: [{ schema: "app", name: "owned", owner: "target", rlsEnabled: false, forceRls: false, isPartitioned: false, estimatedRows: null }],
+      policies: [], relationPrivileges: [],
+      schemaPrivileges: [{ schema: "app", grantor: "target", grantee: "target", privilege: "USAGE", grantable: false }],
+      defaultPrivileges: [{ schema: "app", owner: "target", grantee: "target", objectType: "TABLE", privilege: "SELECT", grantable: false }],
+      ...topology
+    }, { schemas: ["app"] });
+
+    expect(report.schemaFindings[0]?.detail).toMatch(/SET ROLE/);
+    expect(report.tables[0]?.findings.find(({ id }) => id === "rls-disabled-exposed")?.detail).toMatch(/SET ROLE/);
   });
 
   it("does not treat inherited SUPERUSER or BYPASSRLS attributes as inherited bypass", () => {
@@ -367,6 +509,29 @@ describe("analyzeCatalog", () => {
 
     expect(report.schemaFindings).toEqual([]);
     expect(report.summary.findings.high).toBe(0);
+  });
+
+  it("does not inherit bypass attributes after SET ROLE into an ordinary inheriting role", () => {
+    const report = analyzeCatalog(
+      {
+        tables: [],
+        policies: [],
+        relationPrivileges: [],
+        defaultPrivileges: [],
+        roles: [
+          { name: "authenticated", superuser: false, bypassRls: false, inherits: true },
+          { name: "switcher", superuser: false, bypassRls: false, inherits: true },
+          { name: "admin", superuser: true, bypassRls: true, inherits: true }
+        ],
+        roleMemberships: [
+          { role: "switcher", member: "authenticated", inheritOption: false, setOption: true },
+          { role: "admin", member: "switcher", inheritOption: true, setOption: false }
+        ]
+      },
+      { schemas: ["public"] }
+    );
+
+    expect(report.schemaFindings).toEqual([]);
   });
 
   it("reports direct and SET ROLE access to SUPERUSER or BYPASSRLS roles", () => {
@@ -434,11 +599,12 @@ describe("analyzeCatalog", () => {
       { schemas: ["public"] }
     );
 
-    expect(report.tables[0]?.findings).toEqual([
+    expect(report.tables[0]?.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "reachable-truncate", severity: "high" }),
       expect.objectContaining({ id: "force-rls-disabled", severity: "info" })
-    ]);
-    expect(report.summary.findings.high).toBe(0);
-    expect(shouldFail(report, "high")).toBe(false);
+    ]));
+    expect(report.summary.findings.high).toBe(1);
+    expect(shouldFail(report, "high")).toBe(true);
   });
 
   it("normalizes omitted legacy catalog facts to empty arrays", () => {
