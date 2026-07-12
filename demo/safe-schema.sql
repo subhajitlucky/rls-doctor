@@ -13,6 +13,10 @@ begin
 end
 $$;
 
+revoke all on schema rls_doctor_demo_safe from public;
+grant usage on schema rls_doctor_demo_safe to authenticated;
+alter default privileges in schema rls_doctor_demo_safe revoke all on tables from public, authenticated;
+
 create schema if not exists auth;
 create or replace function auth.uid()
 returns uuid
@@ -31,6 +35,7 @@ create table rls_doctor_demo_safe.tasks (
 
 alter table rls_doctor_demo_safe.tasks enable row level security;
 alter table rls_doctor_demo_safe.tasks force row level security;
+grant select, insert, update on rls_doctor_demo_safe.tasks to authenticated;
 
 create policy "users read own tasks"
   on rls_doctor_demo_safe.tasks

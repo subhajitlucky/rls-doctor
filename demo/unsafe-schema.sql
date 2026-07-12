@@ -10,8 +10,16 @@ begin
   if not exists (select 1 from pg_roles where rolname = 'authenticated') then
     create role authenticated;
   end if;
+  if not exists (select 1 from pg_roles where rolname = 'rls_doctor_demo_reader') then
+    create role rls_doctor_demo_reader;
+  end if;
 end
 $$;
+
+grant rls_doctor_demo_reader to authenticated;
+grant usage on schema rls_doctor_demo to authenticated, rls_doctor_demo_reader;
+alter default privileges in schema rls_doctor_demo revoke all on tables from authenticated;
+alter default privileges in schema rls_doctor_demo grant insert on tables to authenticated;
 
 create schema if not exists auth;
 create or replace function auth.uid()
@@ -40,6 +48,9 @@ create table rls_doctor_demo.tasks (
   owner_id uuid not null,
   title text not null
 );
+
+grant select on rls_doctor_demo.orders to authenticated, rls_doctor_demo_reader;
+grant select, update, truncate on rls_doctor_demo.profiles to authenticated;
 
 alter table rls_doctor_demo.profiles enable row level security;
 create policy "anyone can read profiles"

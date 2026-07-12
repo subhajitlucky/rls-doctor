@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 const containerName = `rls-doctor-${randomUUID()}`;
 const port = 55432 + Math.floor(Math.random() * 1000);
 const connectionString = `postgres://postgres:postgres@127.0.0.1:${port}/rls_doctor`;
+const postgresVersion = process.env.POSTGRES_VERSION ?? "16";
 
 try {
   await docker([
@@ -24,7 +25,7 @@ try {
     "POSTGRES_DB=rls_doctor",
     "-p",
     `${port}:5432`,
-    "postgres:16"
+    `postgres:${postgresVersion}`
   ]);
 
   await waitForPostgres(connectionString);
@@ -37,7 +38,7 @@ try {
     maxBuffer: 1024 * 1024
   });
 
-  console.log("Docker integration test passed.");
+  console.log(`Docker integration test passed on PostgreSQL ${postgresVersion}.`);
 } finally {
   await docker(["rm", "-f", containerName]).catch(() => undefined);
 }

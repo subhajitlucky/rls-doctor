@@ -45,12 +45,17 @@ jobs:
         run: npm audit --audit-level=low
 
   integration:
-    name: Integration
+    name: Integration (PostgreSQL ${{ matrix.postgres-version }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres-version: [15, 16]
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres-version }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
