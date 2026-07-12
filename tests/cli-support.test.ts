@@ -90,6 +90,35 @@ describe("formatCliError", () => {
     expect(output).not.toContain("x.*");
     expect(output).not.toContain(connectionString);
   });
+
+  it("redacts raw @ characters in a known URL's user info while retaining the host", () => {
+    const connectionString = "postgres://u:p@ss@db.test/app";
+    const output = formatCliError(new Error(`could not connect to ${connectionString}`), connectionString);
+
+    expect(output).toContain("db.test/app");
+    expect(output).not.toContain(connectionString);
+    expect(output).not.toContain("p@ss");
+    expect(output).not.toContain("@ss@db.test");
+  });
+
+  it("redacts raw @ characters in generic URL user info without a resolved connection", () => {
+    const output = formatCliError(
+      "postgres://first@name:p@ss@db.test/app and postgresql://other:p@ss@db2.test/app"
+    );
+
+    expect(output).toContain("postgres://[redacted]@db.test/app");
+    expect(output).toContain("postgresql://[redacted]@db2.test/app");
+    expect(output).not.toContain("first@name");
+    expect(output).not.toContain("p@ss");
+  });
+
+  it("handles long whitespace credential mismatches without pathological backtracking", () => {
+    const message = `password${" ".repeat(10_000)}not-the-secret`;
+    const startedAt = performance.now();
+
+    expect(formatCliError(message, "postgres://user:secret@db.test/app")).toBe(message);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+  });
 });
 
 describe("resolveConnectionString", () => {

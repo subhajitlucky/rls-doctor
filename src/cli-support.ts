@@ -13,17 +13,19 @@ export function resolveConnectionString(value?: string): string {
 export function formatCliError(error: unknown, connectionString?: string): string {
   let message = error instanceof Error ? error.message : String(error);
 
-  // Redact every Postgres URL's user-info while retaining its host, port, and path.
-  message = message.replace(/\b(postgres(?:ql)?:\/\/)[^\s/@]+@/gi, "$1[redacted]@");
+  if (connectionString && message.includes(connectionString)) {
+    const sanitizedConnection = redactPostgresUrlUserInfo(connectionString);
+    const replacement =
+      sanitizedConnection === connectionString ? "[redacted connection]" : sanitizedConnection;
+    message = message.split(connectionString).join(replacement);
+  }
+
+  // Redact every other Postgres URL's complete authority user-info.
+  message = redactPostgresUrlUserInfo(message);
 
   if (!connectionString) return message;
 
   const credentials = parseCredentials(connectionString);
-
-  // A malformed connection string may not match the generic URL pattern above.
-  if (message.includes(connectionString)) {
-    message = message.split(connectionString).join("[redacted connection]");
-  }
 
   for (const credential of credentials.components) {
     message = redactLabeledCredential(message, credential);
@@ -72,10 +74,39 @@ function parseCredentials(connectionString: string): Credentials {
 function redactLabeledCredential(message: string, credential: string): string {
   const escaped = escapeRegExp(credential);
   const pattern = new RegExp(
-    `(\\b(?:user|username|password)\\b\\s*(?:=|:|\\s)\\s*["']?)${escaped}(?=["']?(?:\\s|[;,.)]|$))`,
+    `(\\b(?:user|username|password)\\b(?:\\s*(?:=|:)\\s*|\\s+)["']?)${escaped}(?=["']?(?:\\s|[;,.)]|$))`,
     "gi"
   );
   return message.replace(pattern, "$1[redacted]");
+}
+
+function redactPostgresUrlUserInfo(input: string): string {
+  const schemePattern = /\bpostgres(?:ql)?:\/\//gi;
+  let result = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = schemePattern.exec(input)) !== null) {
+    const authorityStart = match.index + match[0].length;
+    let authorityEnd = authorityStart;
+
+    while (authorityEnd < input.length && !/[\s/?#]/.test(input.charAt(authorityEnd))) {
+      authorityEnd += 1;
+    }
+
+    const authority = input.slice(authorityStart, authorityEnd);
+    const userInfoEnd = authority.lastIndexOf("@");
+
+    result += input.slice(cursor, authorityStart);
+    result +=
+      userInfoEnd === -1
+        ? authority
+        : `[redacted]@${authority.slice(userInfoEnd + 1)}`;
+    cursor = authorityEnd;
+    schemePattern.lastIndex = authorityEnd;
+  }
+
+  return result + input.slice(cursor);
 }
 
 function redactAuthenticationUserInfo(message: string, userInfo: string): string {
