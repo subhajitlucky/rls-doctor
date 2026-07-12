@@ -6,10 +6,10 @@
 
 For Supabase Data API access, two layers matter:
 
-1. Grants decide whether a Postgres role such as `anon`, `authenticated`, or `service_role` can reach a table, view, or function.
+1. Schema `USAGE`, table privileges, and reachable role membership decide whether a role such as `anon` or `authenticated` can reach a table.
 2. RLS policies decide which rows that role can read or modify.
 
-RLS cannot help if a table is exposed with broad grants and unsafe policies. Grants also cannot express per-row ownership by themselves.
+These layers are cumulative: a policy does not grant table access, and a grant does not express per-row ownership. RLS Doctor follows direct, inherited, and `SET ROLE` paths and requires schema `USAGE` when classifying current table reachability. Default table privileges are different again: they can grant access to future tables created by a particular owner, subject to schema access, but are not evidence that an existing table is currently reachable.
 
 ## Unsafe Patterns
 
@@ -78,7 +78,7 @@ create policy "users read own tasks"
   using ((select auth.uid()) = owner_id);
 ```
 
-### Write Policy Without WITH CHECK
+### Update Policy Without Explicit WITH CHECK
 
 ```sql
 create policy "users update own tasks"
@@ -88,7 +88,9 @@ create policy "users update own tasks"
   using ((select auth.uid()) = owner_id);
 ```
 
-Problem: the existing row is scoped, but the updated row may not be constrained.
+At first glance the existing row is scoped while the updated row appears unconstrained. PostgreSQL's fallback changes that conclusion.
+
+PostgreSQL nuance: for `UPDATE`, an omitted `WITH CHECK` falls back to `USING`. The example's scoped `USING` is therefore an effective new-row check, and RLS Doctor does not label it unconstrained. An explicit `WITH CHECK` remains clearer and lets you enforce a distinct post-update rule. `INSERT` uses only `WITH CHECK`; `DELETE` uses only `USING` and does not need `WITH CHECK`; `SELECT` uses only `USING`; `ALL` is evaluated under each command's semantics.
 
 Safer update pattern:
 
@@ -132,3 +134,7 @@ create policy "users update own tasks"
 ```
 
 Review the column names and predicates for your actual tenant model before applying any template.
+
+Also review privileges that RLS cannot constrain. In particular, do not grant `TRUNCATE` to application-facing roles: RLS never protects it. Table owners normally bypass policies unless `FORCE ROW LEVEL SECURITY` is enabled, while superusers and `BYPASSRLS` roles bypass RLS even with `FORCE`.
+
+Suggested SQL emitted by RLS Doctor is a review template and is never executed automatically. The audit does not prove arbitrary predicate correctness, simulate client requests, audit views/functions or hosted Supabase management configuration, or establish compliance.

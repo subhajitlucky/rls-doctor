@@ -17,14 +17,16 @@ npx rls-doctor check --connection "$DATABASE_URL"
 
 ```txt
 RLS Doctor Report
+Generated: 2026-07-12T00:00:00.000Z
 Schemas: public
 
-Summary: 3 tables, 4 policies, highest risk HIGH
+Summary: 1 tables, 0 policies, highest risk HIGH
+Findings: critical 0, high 1, medium 0, low 0, info 0
 
 public.orders
   RLS disabled; force RLS disabled; 0 policies
-  [HIGH] Row Level Security is disabled
-    public.orders can be read or changed according to table privileges without row-level policy checks.
+  [HIGH] RLS-disabled table is reachable by an application role
+    public.orders has no row-level checks; Application role authenticated has direct access and can exercise SELECT granted to authenticated.
     Fix: Enable RLS and add least-privilege policies for each application role.
 ```
 
@@ -34,10 +36,11 @@ public.orders
 
 Postgres RLS is one of the strongest tools for multi-tenant data isolation, but the failure modes are easy to miss during normal feature work:
 
-- A table is granted to application roles while RLS is still disabled.
+- A table is granted to application roles while RLS is still disabled, including through role membership.
 - RLS is enabled but no policy exists, breaking application access.
 - `anon` or `public` can read every row through `using (true)`.
-- Write policies forget `WITH CHECK`, allowing unsafe inserted or updated rows.
+- Command-specific policy predicates are broad or missing: `USING` for reads/deletes, `WITH CHECK` for inserts, and both for updates.
+- Default privileges can expose future tables, or an application role can reach `TRUNCATE`, which RLS never protects.
 - Sensitive tables do not use `FORCE ROW LEVEL SECURITY`.
 
 `rls-doctor` gives teams a repeatable local and CI check for those mistakes. It does not mutate your database and does not call Supabase management APIs.
@@ -57,7 +60,7 @@ npm install -g rls-doctor
 rls-doctor check --connection "$DATABASE_URL"
 ```
 
-Use a read-only database user when possible.
+Prefer `DATABASE_URL` or `SUPABASE_DB_URL` containing read-only audit credentials. Passing a secret with `--connection` can expose it in shell history and process listings. Connection errors are sanitized to remove URL credentials, but credentials should still be treated as secrets.
 
 ## Commands
 
@@ -85,7 +88,7 @@ Options:
 --statement-timeout <ms>     Catalog query timeout. Default: 10000
 ```
 
-Connection string fallback:
+Environment variable fallback (preferred; `DATABASE_URL` takes precedence):
 
 ```bash
 DATABASE_URL=postgres://readonly_user:password@host:5432/app
@@ -122,13 +125,22 @@ Next steps
 
 | Check | Severity | Why it matters |
 | --- | --- | --- |
-| RLS disabled | High | Table privileges can expose rows without row-level predicates. |
+| Reachable `TRUNCATE` | High | RLS never protects `TRUNCATE`. |
+| RLS disabled and reachable | High | An application-facing role has a row-access privilege and schema `USAGE`, without row checks. |
+| RLS disabled, not currently reachable | Medium | No reachable application privilege was found, but a later grant can expose the table. |
 | RLS enabled with no policies | Medium | Non-owner roles are default-denied and app access may break. |
 | Public-like unconditional read | High | `public`, `anon`, or anonymous-style roles can read every row. |
-| Public-like unconditional write | Critical | Broad roles can insert or update rows too freely. |
-| Write policy missing `WITH CHECK` | Medium | Updated or inserted rows may escape the intended ownership boundary. |
+| Public-like unconditional write | Critical | Broad roles can insert, update, or delete rows too freely. |
+| Write policy missing effective check | Medium | An insert/update has no effective constraint on new rows. |
+| Multiple permissive policies | Medium for public-like roles; otherwise Low | Policies for the same role/command are OR-combined. |
 | Permissive public-like policy | Low | Permissive policies are OR-combined and can widen access unexpectedly. |
-| `FORCE RLS` disabled | Info | Table owners and privileged sessions can bypass RLS. |
+| Broad default table privilege | High for writes/`TRUNCATE`; Medium for `SELECT`; Low otherwise | Future tables created by that owner can receive the privilege; actual access still requires schema `USAGE`. |
+| Application path to `SUPERUSER`/`BYPASSRLS` | High | These role attributes bypass RLS even when `FORCE` is enabled. |
+| `FORCE RLS` disabled | Info | The table owner bypasses RLS; superusers and `BYPASSRLS` roles bypass regardless. |
+
+Policy checks follow PostgreSQL command semantics: `SELECT` evaluates `USING`; `INSERT` evaluates `WITH CHECK`; `DELETE` evaluates `USING` and never needs `WITH CHECK`; `UPDATE` evaluates both. When an `UPDATE` or `ALL` policy omits `WITH CHECK`, PostgreSQL falls back to its `USING` expression, and RLS Doctor analyzes that effective check. `ALL` is checked as each applicable command.
+
+Policies and privileges are different layers. A policy describes which rows an already-privileged role may access; relation grants and schema `USAGE` determine whether it can reach the table. RLS Doctor follows direct, inherited, and `SET ROLE` membership paths (including PostgreSQL 16 per-membership options; PostgreSQL 15 behavior is normalized), and reports current access separately from default privileges that may affect future tables. It does not claim exact ACL reconstruction for explicit empty default overrides.
 
 ## CI Usage
 
@@ -164,9 +176,11 @@ Exit codes:
 - `1` when at least one finding meets or exceeds `--fail-on`.
 - `2` when the CLI cannot run, connect, or parse options.
 
+`--fail-on none` always disables finding-based failure. A clean report uses `highestSeverity: "none"`; `--fail-on info` therefore still exits `0` when there are no findings. JSON reports use `schemaVersion: "1.0"` and contain top-level `schemaFindings` for default-privilege and role-bypass findings in addition to per-table findings.
+
 ## Supabase Notes
 
-For Supabase projects, `rls-doctor` audits the Postgres RLS layer. Supabase Data API exposure also depends on grants to roles such as `anon`, `authenticated`, and `service_role`, so review grants and RLS policies together.
+For Supabase projects, `rls-doctor` audits catalog-visible PostgreSQL RLS, grants, and relevant role paths. It does not audit hosted Supabase management settings, views, or functions. Review Data API configuration and other database objects separately.
 
 See [`docs/guides/supabase-rls-patterns.md`](docs/guides/supabase-rls-patterns.md) for unsafe and safer policy examples.
 
@@ -239,7 +253,16 @@ Integration test:
 npm run test:integration
 ```
 
-`npm run test:integration` starts a disposable Postgres Docker container, loads `demo/unsafe-schema.sql`, runs `check`, runs `explain`, and removes the container.
+`npm run test:integration` starts its own disposable Postgres Docker container, opts into destructive fixtures, runs `check`/`explain`, and removes the container. If you invoke `scripts/run-integration.js` yourself, it refuses to continue unless `RLS_DOCTOR_ALLOW_DESTRUCTIVE_TESTS=1` is set. Use that guard only with a disposable database: the fixtures create/drop schemas and shared roles and alter default privileges.
+
+## Scope and Non-goals
+
+RLS Doctor is a focused catalog audit, not a proof or compliance product. It does not:
+
+- prove arbitrary SQL predicate correctness or simulate requests (`can`-style checks);
+- audit views, functions, or hosted Supabase management configuration;
+- automatically execute suggested SQL (suggestions are review templates); or
+- make a compliance claim.
 
 ## Publishing
 
@@ -263,6 +286,6 @@ npm publish --access public
 
 ## Safety
 
-`rls-doctor` never prints the connection string. It only queries Postgres catalog views and should be run with a low-privilege user.
+`rls-doctor` sanitizes connection credentials from its own errors and only queries Postgres catalogs. Prefer a low-privilege user and an environment variable; a `--connection` value can still be exposed by the invoking shell or operating system.
 
 This is a security review aid, not a replacement for application-level authorization tests, grant reviews, or a full production security audit.
