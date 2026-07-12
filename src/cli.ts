@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { Command } from "commander";
 import { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
 import type { Severity } from "./audit/types.js";
+import { formatCliError, resolveConnectionString } from "./cli-support.js";
 import { loadCatalog } from "./db/catalog.js";
 import { renderJsonReport } from "./reporters/json.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
@@ -25,8 +26,10 @@ program
   .option("--fail-on <severity>", "Exit with code 1 when this severity or higher exists.", "high")
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
   .action(async (options: CheckOptions) => {
+    let connectionString: string | undefined;
+
     try {
-      const connectionString = resolveConnectionString(options.connection);
+      connectionString = resolveConnectionString(options.connection);
       const schemas = normalizeSchemas(options.schema);
       const failOn = normalizeFailOn(options.failOn);
       const statementTimeoutMs = Number(options.statementTimeout);
@@ -48,7 +51,7 @@ program
         process.exitCode = 1;
       }
     } catch (error) {
-      process.stderr.write(`rls-doctor: ${formatError(error)}\n`);
+      process.stderr.write(`rls-doctor: ${formatCliError(error, connectionString)}\n`);
       process.exitCode = 2;
     }
   });
@@ -61,8 +64,10 @@ program
   .option("-s, --schema <schema...>", "Schema names to audit.", ["public"])
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
   .action(async (tableRef: string, options: ExplainOptions) => {
+    let connectionString: string | undefined;
+
     try {
-      const connectionString = resolveConnectionString(options.connection);
+      connectionString = resolveConnectionString(options.connection);
       const schemas = normalizeSchemas(options.schema);
       const statementTimeoutMs = Number(options.statementTimeout);
 
@@ -85,7 +90,7 @@ program
 
       process.stdout.write(renderExplainReport(table));
     } catch (error) {
-      process.stderr.write(`rls-doctor: ${formatError(error)}\n`);
+      process.stderr.write(`rls-doctor: ${formatCliError(error, connectionString)}\n`);
       process.exitCode = 2;
     }
   });
@@ -106,16 +111,6 @@ interface ExplainOptions {
   statementTimeout: string;
 }
 
-function resolveConnectionString(value?: string): string {
-  const connectionString = value ?? process.env.DATABASE_URL ?? process.env.SUPABASE_DB_URL;
-
-  if (!connectionString) {
-    throw new Error("Missing connection string. Pass --connection or set DATABASE_URL.");
-  }
-
-  return connectionString;
-}
-
 function normalizeSchemas(schemas: string[]): string[] {
   const normalized = schemas.map((schema) => schema.trim()).filter(Boolean);
 
@@ -132,12 +127,4 @@ function normalizeFailOn(value: string): Severity | "none" {
   }
 
   throw new Error("--fail-on must be one of info, low, medium, high, critical, none.");
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }
