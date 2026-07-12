@@ -85,3 +85,4 @@ jobs:
         run: npm run test:integration:db
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rls_doctor
+          RLS_DOCTOR_ALLOW_DESTRUCTIVE_TESTS: "1"
