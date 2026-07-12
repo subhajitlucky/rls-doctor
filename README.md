@@ -28,7 +28,7 @@ Findings: critical 0, high 1, medium 0, low 0, info 0
 public.orders
   RLS disabled; force RLS disabled; 0 policies
   [HIGH] RLS-disabled table is reachable by an application role
-    public.orders has no row-level checks; Application role authenticated has direct access and can exercise SELECT granted to authenticated.
+    public.orders has no row-level checks; Application role authenticated and can exercise SELECT granted to authenticated.
     Fix: Enable RLS and add least-privilege policies for each application role.
     Suggested SQL:
       alter table "public"."orders" enable row level security;
@@ -43,7 +43,7 @@ Postgres RLS is one of the strongest tools for multi-tenant data isolation, but 
 
 - A table is granted to application roles while RLS is still disabled, including through role membership.
 - RLS is enabled but no policy exists, breaking application access.
-- `anon` or `public` can read every row through `using (true)`.
+- A policy for `anon` or `public` has an unconditional predicate for an applicable command.
 - Command-specific policy predicates are broad or missing: `USING` for reads/deletes, `WITH CHECK` for inserts, and both for updates.
 - Default privileges can expose future tables, or an application role can reach `TRUNCATE`, which RLS never protects.
 - Sensitive tables do not use `FORCE ROW LEVEL SECURITY`.
@@ -130,11 +130,11 @@ Next steps
 | Check | Severity | Why it matters |
 | --- | --- | --- |
 | Reachable `TRUNCATE` | High | RLS never protects `TRUNCATE`. |
-| RLS disabled and reachable | High | An application-facing role has a row-access privilege and schema `USAGE`, without row checks. |
+| RLS disabled and reachable | High | An application-facing role has a row-access privilege plus schema `USAGE`, or can directly/through `SET ROLE` reach a superuser, without row checks. |
 | RLS disabled, not currently reachable | Medium | No reachable application privilege was found, but a later grant can expose the table. |
 | RLS enabled with no policies | Medium | Non-owner roles are default-denied and app access may break. |
-| Public-like unconditional read | High | `public`, `anon`, or anonymous-style roles can read every row. |
-| Public-like unconditional write | Critical | Broad roles can insert, update, or delete rows too freely. |
+| Public-like unconditional read | High | A `public`, `anon`, or anonymous-style policy has an unconditional `USING` predicate for `SELECT`/`ALL`. |
+| Public-like unconditional write | Critical | A public-like policy has an unconditional command-applicable predicate for `INSERT`, `UPDATE`, `DELETE`, or `ALL`. |
 | Omitted `WITH CHECK` leaves the effective write constraint unconditional | Medium | An `INSERT`, `UPDATE`, or `ALL` policy omits `WITH CHECK`, and its PostgreSQL fallback (if any) is unconditional. |
 | Multiple permissive policies | Medium for public-like roles; otherwise Low | Policies for the same role/command are OR-combined. |
 | Permissive public-like policy | Low | Permissive policies are OR-combined and can widen access unexpectedly. |
@@ -144,7 +144,9 @@ Next steps
 
 Policy checks follow PostgreSQL command semantics: `SELECT` evaluates `USING`; `INSERT` evaluates `WITH CHECK`; `DELETE` evaluates `USING` and never needs `WITH CHECK`; `UPDATE` evaluates both. When an `UPDATE` or `ALL` policy omits `WITH CHECK`, PostgreSQL falls back to its `USING` expression, and RLS Doctor analyzes that effective check. `ALL` is checked as each applicable command.
 
-Policies and privileges are different layers. A policy describes which rows an already-privileged role may access; relation grants and schema `USAGE` determine whether it can reach the table. RLS Doctor follows direct, inherited, and `SET ROLE` membership paths (including PostgreSQL 16 per-membership options; PostgreSQL 15 behavior is normalized), and reports current access separately from default privileges that may affect future tables. It does not claim exact ACL reconstruction for explicit empty default overrides.
+Policies and privileges are different layers. A policy describes which rows an already-privileged role may access; normally, relation grants and schema `USAGE` determine whether it can reach the table. A directly available or `SET ROLE`-reachable superuser is the exception and has ACL/schema-independent object access. `BYPASSRLS` alone bypasses row policies but does not supply object or schema privileges. RLS Doctor follows direct, inherited, and `SET ROLE` membership paths (including PostgreSQL 16 per-membership options; PostgreSQL 15 behavior is normalized), and reports current access separately from default privileges that may affect future tables. It does not claim exact ACL reconstruction for explicit empty default overrides.
+
+Unconditional-policy findings are structural, high-signal warnings rather than proof of final authorization. PostgreSQL OR-combines permissive policies and then AND-combines the result with applicable restrictive policies, so restrictive composition can still constrain effective access.
 
 ## CI Usage
 

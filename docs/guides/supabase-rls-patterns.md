@@ -6,10 +6,10 @@
 
 For Supabase Data API access, two layers matter:
 
-1. Schema `USAGE`, table privileges, and reachable role membership decide whether a role such as `anon` or `authenticated` can reach a table.
+1. Schema `USAGE`, table privileges, and reachable role membership normally decide whether a role such as `anon` or `authenticated` can reach a table.
 2. RLS policies decide which rows that role can read or modify.
 
-These layers are cumulative: a policy does not grant table access, and a grant does not express per-row ownership. RLS Doctor follows direct, inherited, and `SET ROLE` paths and requires schema `USAGE` when classifying current table reachability. Default table privileges are different again: they can grant access to future tables created by a particular owner, subject to schema access, but are not evidence that an existing table is currently reachable.
+These layers are cumulative: a policy does not grant table access, and a grant does not express per-row ownership. RLS Doctor follows direct, inherited, and `SET ROLE` paths and normally requires a relation privilege plus schema `USAGE` when classifying current table reachability. A directly available or `SET ROLE`-reachable superuser is the exception because superuser object access is ACL/schema-independent. `BYPASSRLS` alone does not grant object or schema access. Default table privileges are different again: they can grant access to future tables created by a particular owner, subject to schema access, but are not evidence that an existing table is currently reachable.
 
 ## Unsafe Patterns
 
@@ -44,7 +44,7 @@ create policy "anyone can read profiles"
   using (true);
 ```
 
-Problem: every row is readable. That can be correct for a public catalog, but it is risky for user, tenant, billing, or operational data.
+Problem: this policy contributes an unconditional `SELECT` predicate for `public`. That can be intentional for a public catalog, but it is a high-signal structural risk for user, tenant, billing, or operational data. Applicable restrictive policies can still constrain the final effective policy.
 
 Safer public-content pattern:
 
@@ -66,7 +66,7 @@ create policy "signed in users can read"
   using (true);
 ```
 
-Problem: authentication is not authorization. Every signed-in user can read every row.
+Problem: authentication is not authorization. This policy contributes an unconditional permissive read predicate for every signed-in user; applicable restrictive policies can still narrow final effective access.
 
 Safer owner pattern:
 

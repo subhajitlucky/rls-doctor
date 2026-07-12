@@ -59,7 +59,7 @@ The tool only needs enough database permission to inspect catalog metadata for t
 
 ## Risk Model
 
-The analyzer keeps two independent layers explicit: privileges determine whether a role can reach an object, while policies restrict rows after access is granted. Current table exposure requires a compatible relation privilege and schema `USAGE`; direct, inherited, and `SET ROLE` routes are considered. PostgreSQL 16 membership `INHERIT`/`SET` options are respected, and PostgreSQL 15 memberships use the server's legacy member-`INHERIT` plus `SET ROLE` behavior.
+The analyzer keeps two independent layers explicit: privileges determine whether a role can reach an object, while policies restrict rows after access is granted. Current table exposure normally requires a compatible relation privilege and schema `USAGE`; direct, inherited, and `SET ROLE` routes are considered. Directly available or `SET ROLE`-reachable superusers are the exception because their object access is ACL/schema-independent. `BYPASSRLS` alone bypasses row policies but does not provide object or schema privileges. PostgreSQL 16 membership `INHERIT`/`SET` options are respected, and PostgreSQL 15 memberships use the server's legacy member-`INHERIT` plus `SET ROLE` behavior.
 
 Policy analysis is command-aware: `SELECT` and `DELETE` use `USING`, `INSERT` uses `WITH CHECK`, and `UPDATE` uses both. An omitted `UPDATE`/`ALL` `WITH CHECK` falls back to `USING`. `ALL` participates in every applicable command, and permissive policies for one role/command are analyzed together because they are OR-combined.
 
@@ -67,8 +67,8 @@ The analyzer focuses on mistakes that are common, high-signal, and explainable:
 
 - RLS disabled, distinguished by whether application access is currently reachable.
 - RLS enabled with no policies.
-- Public-like roles with unconditional read access.
-- Public-like roles with unconditional write access.
+- Public-like policies with unconditional predicates for applicable read commands.
+- Public-like policies with unconditional predicates for applicable write commands.
 - Command-specific unconditional or effectively unconstrained policies.
 - Reachable `TRUNCATE`, which is independent of RLS.
 - Broad default table privileges, represented as potential future exposure rather than current access.
@@ -77,6 +77,8 @@ The analyzer focuses on mistakes that are common, high-signal, and explainable:
 - Missing `FORCE ROW LEVEL SECURITY` hardening.
 
 Table owners bypass RLS unless `FORCE ROW LEVEL SECURITY` is enabled; superusers and `BYPASSRLS` roles bypass it regardless. The loader reports stored default ACL entries and does not claim exact reconstruction of explicit empty overrides.
+
+An individual unconditional-policy finding is structural evidence, not proof that the role's final effective policy admits every row. Permissive predicates are OR-combined, then applicable restrictive policies are AND-combined with that result and may still narrow access.
 
 The tool cannot prove arbitrary SQL predicate correctness, simulate requests, audit views/functions or hosted Supabase management settings, execute suggested SQL, or establish compliance. It should complement application tests and security review.
 
