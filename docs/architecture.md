@@ -43,7 +43,7 @@ Exit code
 4. It queries table/policy metadata plus relation ACLs, schema ACLs, default ACLs, role attributes, and memberships.
 5. The analyzer builds application-role reachability, groups policies by table/command, and creates table and schema/role findings.
 6. A reporter renders either text or JSON.
-7. The CLI sets exit code `1` only when findings meet the configured threshold.
+7. The CLI sets exit code `1` when findings meet the configured threshold. Commander also uses `1` for usage/option parse errors; caught action, connection, and catalog failures use `2`.
 
 ## Security Model
 

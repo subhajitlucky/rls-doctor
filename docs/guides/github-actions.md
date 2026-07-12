@@ -83,6 +83,6 @@ DATABASE_URL=postgres://readonly_user:password@host:5432/app \
   npx rls-doctor check --schema public --fail-on high
 ```
 
-Exit code `0` means no finding met the threshold, `1` means at least one did, and `2` means the command could not run. `--fail-on none` disables finding-based failure; even `--fail-on info` exits `0` for a clean audit.
+Exit code `0` means no finding met the threshold. A threshold finding exits `1`, but Commander usage or option-parsing errors also exit `1`, so CI logs or JSON output must distinguish those cases. Caught action/runtime failures—including missing credentials, connection/catalog errors, invalid action values, and a missing requested table—exit `2`. `--fail-on none` disables finding-based failure; even `--fail-on info` exits `0` for a clean audit.
 
 The repository's destructive integration fixture runner is separately guarded by `RLS_DOCTOR_ALLOW_DESTRUCTIVE_TESTS=1`. Set it only for a disposable database: those fixtures create and drop schemas/shared roles and change default privileges. The normal Docker integration command supplies the guard to its own disposable container.

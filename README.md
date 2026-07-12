@@ -15,6 +15,8 @@ It connects to a database with a Postgres connection string, reads catalog metad
 npx rls-doctor check --connection "$DATABASE_URL"
 ```
 
+Example output for a one-table snapshot:
+
 ```txt
 RLS Doctor Report
 Generated: 2026-07-12T00:00:00.000Z
@@ -28,6 +30,9 @@ public.orders
   [HIGH] RLS-disabled table is reachable by an application role
     public.orders has no row-level checks; Application role authenticated has direct access and can exercise SELECT granted to authenticated.
     Fix: Enable RLS and add least-privilege policies for each application role.
+    Suggested SQL:
+      alter table "public"."orders" enable row level security;
+      -- Then add policies that match your access model before exposing this table to client roles.
 ```
 
 ![RLS Doctor terminal preview](docs/assets/terminal-preview.svg)
@@ -103,7 +108,7 @@ Inspect one table:
 rls-doctor explain public.profiles --connection "$DATABASE_URL"
 ```
 
-Example output:
+Example (abridged excerpt; lines containing `...` are omission markers, not literal CLI output):
 
 ```txt
 RLS Doctor Explain: public.profiles
@@ -117,8 +122,7 @@ Policies
   - anon can update profiles: UPDATE, permissive, roles public
 
 Next steps
-  - [HIGH] Restrict the policy with tenant, owner, or explicit public-content predicates.
-  - [CRITICAL] Require authenticated ownership checks and explicit WITH CHECK constraints for writes.
+  ...
 ```
 
 ## What It Checks
@@ -131,7 +135,7 @@ Next steps
 | RLS enabled with no policies | Medium | Non-owner roles are default-denied and app access may break. |
 | Public-like unconditional read | High | `public`, `anon`, or anonymous-style roles can read every row. |
 | Public-like unconditional write | Critical | Broad roles can insert, update, or delete rows too freely. |
-| Write policy missing effective check | Medium | An insert/update has no effective constraint on new rows. |
+| Omitted `WITH CHECK` leaves the effective write constraint unconditional | Medium | An `INSERT`, `UPDATE`, or `ALL` policy omits `WITH CHECK`, and its PostgreSQL fallback (if any) is unconditional. |
 | Multiple permissive policies | Medium for public-like roles; otherwise Low | Policies for the same role/command are OR-combined. |
 | Permissive public-like policy | Low | Permissive policies are OR-combined and can widen access unexpectedly. |
 | Broad default table privilege | High for writes/`TRUNCATE`; Medium for `SELECT`; Low otherwise | Future tables created by that owner can receive the privilege; actual access still requires schema `USAGE`. |
@@ -170,11 +174,12 @@ jobs:
 
 Full guide: [`docs/guides/github-actions.md`](docs/guides/github-actions.md)
 
-Exit codes:
+Exit behavior:
 
 - `0` when no finding meets the configured threshold.
 - `1` when at least one finding meets or exceeds `--fail-on`.
-- `2` when the CLI cannot run, connect, or parse options.
+- `1` also for Commander usage and option-parsing errors, before an audit runs.
+- `2` for caught action/runtime failures, including missing credentials, connection/catalog errors, invalid action values such as `--fail-on`, or a requested table not being found.
 
 `--fail-on none` always disables finding-based failure. A clean report uses `highestSeverity: "none"`; `--fail-on info` therefore still exits `0` when there are no findings. JSON reports use `schemaVersion: "1.0"` and contain top-level `schemaFindings` for default-privilege and role-bypass findings in addition to per-table findings.
 
