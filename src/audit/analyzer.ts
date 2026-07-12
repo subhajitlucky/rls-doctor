@@ -119,6 +119,7 @@ function auditTable(
   schemaPrivileges: SchemaPrivilegeSnapshot[] | undefined
 ): TableAudit {
   const findings: Finding[] = [];
+  const sortedPolicies = [...policies].sort((left, right) => left.name.localeCompare(right.name));
   const truncateExposure = findTableExposure(
     table,
     privileges,
@@ -170,10 +171,10 @@ function auditTable(
           }
     );
 
-    return tableAudit(table, policies, findings);
+    return tableAudit(table, sortedPolicies, findings);
   }
 
-  if (policies.length === 0) {
+  if (sortedPolicies.length === 0) {
     findings.push({
       id: "rls-enabled-no-policies",
       severity: "medium",
@@ -205,13 +206,13 @@ function auditTable(
     });
   }
 
-  for (const policy of policies) {
+  for (const policy of sortedPolicies) {
     findings.push(...auditPolicy(table, policy));
   }
 
-  findings.push(...auditPolicyComposition(table, policies));
+  findings.push(...auditPolicyComposition(table, sortedPolicies));
 
-  return tableAudit(table, policies, findings);
+  return tableAudit(table, sortedPolicies, findings);
 }
 
 const concreteCommands: Exclude<PolicyCommand, "ALL">[] = [
@@ -605,6 +606,11 @@ function findTableExposure(
   schemaPrivileges: SchemaPrivilegeSnapshot[] | undefined,
   acceptedPrivileges: Set<string>
 ): string | undefined {
+  const superuserAccess = findSuperuserAccess(roleGraph);
+  if (superuserAccess) {
+    return `${formatAccess(superuserAccess)} and can exercise SUPERUSER object privileges`;
+  }
+
   const candidates: Array<{ privilege: string; grantee: string; access?: RoleAccess }> = [];
   for (const privilege of privileges) {
     if (!acceptedPrivileges.has(privilege.privilege)) continue;
@@ -618,17 +624,20 @@ function findTableExposure(
     if (access) candidates.push({ privilege: privilege.privilege, grantee: privilege.grantee, access });
   }
 
-  if (table.owner) {
-    const access = findCompatibleAccess(roleGraph, table.owner, table.schema, schemaPrivileges);
-    if (access) candidates.push({ privilege: "owner privileges", grantee: table.owner, access });
-  }
-
   const candidate = candidates.sort((left, right) =>
     left.grantee.localeCompare(right.grantee) || left.privilege.localeCompare(right.privilege)
   )[0];
   if (!candidate) return undefined;
   if (!candidate.access) return `PUBLIC has ${candidate.privilege}`;
   return `${formatAccess(candidate.access)} and can exercise ${candidate.privilege} granted to ${candidate.grantee}`;
+}
+
+function findSuperuserAccess(graph: RoleGraph): RoleAccess | undefined {
+  const accesses = [...graph.rolesByName.values()]
+    .filter((role) => role.superuser)
+    .map((role) => findBypassAccess(graph, role.name))
+    .filter((access): access is RoleAccess => access !== undefined);
+  return accesses.sort(compareRoleAccess)[0];
 }
 
 function findCompatibleAccess(
