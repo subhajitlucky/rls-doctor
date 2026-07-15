@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/subhajitlucky/rls-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/subhajitlucky/rls-doctor/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/rls-doctor.svg)](https://www.npmjs.com/package/rls-doctor)
+[![npm downloads](https://img.shields.io/npm/dm/rls-doctor.svg)](https://www.npmjs.com/package/rls-doctor)
 
 `rls-doctor` is a Postgres and Supabase Row Level Security auditor for the command line.
 
