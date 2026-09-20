@@ -1,0 +1,74 @@
+name: RLS Doctor
+description: Audit Postgres and Supabase Row Level Security posture and upload findings to GitHub code scanning.
+author: Subhajit Pradhan
+branding:
+  icon: database
+  color: purple
+
+inputs:
+  connection:
+    description: Postgres connection string with read-only audit credentials.
+    required: true
+  schema:
+    description: Schema names to audit (space-separated).
+    required: false
+    default: public
+  format:
+    description: "Output format: text, json, or sarif."
+    required: false
+    default: sarif
+  output:
+    description: File to write the report to.
+    required: false
+    default: rls-doctor.sarif
+  fail-on:
+    description: "Failure threshold: info, low, medium, high, critical, or none."
+    required: false
+    default: high
+  app-roles:
+    description: Additional application roles to treat as reachable identities (space-separated).
+    required: false
+    default: ""
+  baseline:
+    description: Optional path to a prior JSON report used as a baseline; only new findings can fail the run.
+    required: false
+    default: ""
+  version:
+    description: rls-doctor version to install from npm.
+    required: false
+    default: latest
+  node-version:
+    description: Node.js version used to run the CLI.
+    required: false
+    default: "22"
+
+outputs:
+  report:
+    description: Path to the generated report file.
+    value: ${{ inputs.output }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install rls-doctor
+      shell: bash
+      run: npm install --global "rls-doctor@${{ inputs.version }}"
+
+    - name: Run rls-doctor
+      shell: bash
+      env:
+        DATABASE_URL: ${{ inputs.connection }}
+      run: |
+        args=(check --schema ${{ inputs.schema }} --format "${{ inputs.format }}" --fail-on "${{ inputs.fail-on }}")
+        if [ -n "${{ inputs.app-roles }}" ]; then args+=(--app-roles ${{ inputs.app-roles }}); fi
+        if [ -n "${{ inputs.baseline }}" ]; then args+=(--baseline "${{ inputs.baseline }}"); fi
+
+        rls-doctor "${args[@]}" > "${{ inputs.output }}" && status=0 || status=$?
+        cat "${{ inputs.output }}"
+        echo "rls-doctor exit code: $status"
+        exit $status

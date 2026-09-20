@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import pg from "pg";
 import { loadCatalog } from "../dist/index.js";
@@ -91,6 +93,47 @@ try {
   const safeTasksProbe = safeProbeReport.probes.find((probe) => probe.table === "tasks" && probe.role === "authenticated");
   assertEqual(safeTasksProbe?.status, "rows", "safe tasks probe status");
   assertEqual(safeTasksProbe?.distinctOwners, 1, "safe tasks probe stays scoped to auth.uid()");
+
+  const sarifRun = await runCli(["dist/cli.js", "check", "--connection", auditorUrl, "--schema", "rls_doctor_demo", "--format", "sarif", "--fail-on", "high"]);
+  assertEqual(sarifRun.code, 1, "sarif threshold exit");
+  assertEqual(sarifRun.stderr, "", "sarif stderr");
+  const sarif = JSON.parse(sarifRun.stdout);
+  assertEqual(sarif.version, "2.1.0", "sarif version");
+  assertEqual(sarif.runs[0].tool.driver.name, "rls-doctor", "sarif tool name");
+  assert(
+    sarif.runs[0].tool.driver.rules.some((rule) => rule.id === "rls-disabled-exposed"),
+    "sarif rules include rls-disabled-exposed"
+  );
+  assert(
+    sarif.runs[0].results.some((result) => result.ruleId === "rls-disabled-exposed" && result.level === "error"),
+    "sarif escalates rls-disabled-exposed to error"
+  );
+  assert(
+    sarif.runs[0].results.some((result) => result.ruleId === "reachable-truncate" && result.level === "error"),
+    "sarif escalates reachable truncate to error"
+  );
+  assert(
+    sarif.runs[0].results.every((result) => typeof result.partialFingerprints.rlsDoctorFindingV1 === "string"),
+    "sarif results carry stable fingerprints"
+  );
+
+  const baselineDirectory = await mkdtemp(join(tmpdir(), "rls-doctor-baseline-"));
+  const baselinePath = join(baselineDirectory, "baseline.json");
+  try {
+    const update = await runCli(["dist/cli.js", "check", "--connection", auditorUrl, "--schema", "rls_doctor_demo", "--baseline", baselinePath, "--update-baseline", "--json"]);
+    assertEqual(update.code, 0, "baseline update exit");
+    assertEqual(update.stderr, `rls-doctor: baseline updated at ${baselinePath}\n`, "baseline update message");
+
+    const baselined = await runCli(["dist/cli.js", "check", "--connection", auditorUrl, "--schema", "rls_doctor_demo", "--baseline", baselinePath, "--json", "--fail-on", "high"]);
+    assertEqual(baselined.code, 0, "baselined rerun exit");
+    assertEqual(baselined.stderr, "", "baselined rerun stderr");
+    const baselinedReport = JSON.parse(baselined.stdout);
+    assertEqual(baselinedReport.baseline.new, 0, "baselined new findings");
+    assert(baselinedReport.baseline.unchanged > 0, "baselined unchanged findings");
+    assertEqual(baselinedReport.baseline.resolved, 0, "baselined resolved findings");
+  } finally {
+    await rm(baselineDirectory, { recursive: true, force: true });
+  }
 
   console.log("Integration test passed.");
 } catch (error) {

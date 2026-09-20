@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
+import { writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
+import { loadBaseline } from "./audit/baseline.js";
+import { compareWithBaseline } from "./audit/fingerprint.js";
 import { analyzeProbeResults, shouldFailProbe } from "./audit/probe.js";
 import type { Severity } from "./audit/types.js";
 import { formatCliError, resolveConnectionString } from "./cli-support.js";
@@ -9,6 +12,7 @@ import { loadCatalog } from "./db/catalog.js";
 import { runProbes } from "./db/probe.js";
 import { renderJsonReport } from "./reporters/json.js";
 import { renderProbeJsonReport, renderProbeTextReport } from "./reporters/probe.js";
+import { renderSarifReport } from "./reporters/sarif.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 
 const program = new Command();
@@ -27,6 +31,9 @@ program
   .option("-s, --schema <schema...>", "Schema names to audit.", ["public"])
   .option("--json", "Print machine-readable JSON output.")
   .option("--fail-on <severity>", "Exit with code 1 when this severity or higher exists.", "high")
+  .option("--format <format>", "Output format: text, json, or sarif.")
+  .option("--baseline <path>", "Compare findings with a prior JSON report; only new findings can fail the run.")
+  .option("--update-baseline", "Write the current report to the --baseline path and exit 0.", false)
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
   .option(
     "--app-roles <role...>",
@@ -39,12 +46,21 @@ program
       connectionString = resolveConnectionString(options.connection);
       const schemas = normalizeSchemas(options.schema);
       const failOn = normalizeFailOn(options.failOn);
+      const format = parseFormat(options);
       const statementTimeoutMs = Number(options.statementTimeout);
       const appRoles = normalizeAppRoles(options.appRoles);
 
       if (!Number.isFinite(statementTimeoutMs) || statementTimeoutMs <= 0) {
         throw new Error("--statement-timeout must be a positive number.");
       }
+      if (options.updateBaseline === true && options.baseline === undefined) {
+        throw new Error("--update-baseline requires --baseline <path>.");
+      }
+
+      const baseline =
+        options.baseline === undefined || options.updateBaseline === true
+          ? undefined
+          : await loadBaseline(options.baseline);
 
       const snapshot = await loadCatalog({
         connectionString,
@@ -57,9 +73,39 @@ program
         schemas,
         ...(appRoles.length > 0 ? { appRoles } : {})
       });
-      process.stdout.write(options.json ? renderJsonReport(report) : renderTextReport(report));
 
-      if (shouldFail(report, failOn)) {
+      if (baseline !== undefined) {
+        const comparison = compareWithBaseline(baseline.fingerprints, report);
+        report.baseline = {
+          new: comparison.new.length,
+          unchanged: comparison.unchanged.length,
+          resolved: comparison.resolved.length
+        };
+      }
+
+      if (options.updateBaseline === true && options.baseline !== undefined) {
+        await writeFile(options.baseline, renderJsonReport(report), "utf8");
+        process.stderr.write(`rls-doctor: baseline updated at ${options.baseline}\n`);
+        return;
+      }
+
+      const output =
+        format === "json"
+          ? renderJsonReport(report)
+          : format === "sarif"
+            ? renderSarifReport(report, { toolVersion: packageJson.version })
+            : renderTextReport(report);
+      process.stdout.write(output);
+
+      const baselineFingerprints =
+        baseline === undefined ? undefined : new Set(baseline.fingerprints);
+      if (
+        shouldFail(
+          report,
+          failOn,
+          baselineFingerprints === undefined ? {} : { baselineFingerprints }
+        )
+      ) {
         process.exitCode = 1;
       }
     } catch (error) {
@@ -186,6 +232,9 @@ interface CheckOptions {
   failOn: string;
   statementTimeout: string;
   appRoles?: string[];
+  format?: string;
+  baseline?: string;
+  updateBaseline?: boolean;
 }
 
 interface ExplainOptions {
@@ -229,6 +278,22 @@ function normalizeAppRoles(appRoles: string[] | undefined): string[] {
         .filter((role) => role.length > 0)
     )
   ];
+}
+
+type OutputFormat = "text" | "json" | "sarif";
+
+function parseFormat(options: CheckOptions): OutputFormat {
+  if (options.format !== undefined && !["text", "json", "sarif"].includes(options.format)) {
+    throw new Error("--format must be one of text, json, sarif.");
+  }
+
+  if (options.json === true && options.format !== undefined && options.format !== "json") {
+    throw new Error("--json conflicts with the selected --format value.");
+  }
+
+  return options.json === true
+    ? "json"
+    : ((options.format as OutputFormat | undefined) ?? "text");
 }
 
 function normalizeFailOn(value: string): Severity | "none" {

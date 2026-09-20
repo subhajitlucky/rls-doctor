@@ -121,6 +121,12 @@ export interface AuditSummary {
   highestSeverity: HighestSeverity;
 }
 
+export interface BaselineSummary {
+  new: number;
+  unchanged: number;
+  resolved: number;
+}
+
 export interface AuditReport {
   schemaVersion: "1.0";
   generatedAt: string;
@@ -128,6 +134,7 @@ export interface AuditReport {
   summary: AuditSummary;
   schemaFindings: SchemaFinding[];
   tables: TableAudit[];
+  baseline?: BaselineSummary;
 }
 
 export interface AuditOptions {
