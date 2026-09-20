@@ -30,6 +30,21 @@ try {
   auditorCreated = true;
   const database = (await admin.query("select current_database() as name")).rows[0].name;
   await admin.query(`grant connect on database ${quoteIdentifier(database)} to ${quoteIdentifier(auditorRole)}`);
+  await admin.query(`grant authenticated to ${quoteIdentifier(auditorRole)}`);
+  await admin.query(
+    `insert into rls_doctor_demo.orders (owner_id, total_cents) values
+       ('00000000-0000-0000-0000-000000000001', 100),
+       ('00000000-0000-0000-0000-000000000002', 200)`
+  );
+  await admin.query(
+    `insert into rls_doctor_demo.tasks (owner_id, title) values
+       ('00000000-0000-0000-0000-000000000001', 'mine'),
+       ('00000000-0000-0000-0000-000000000002', 'not mine')`
+  );
+  await admin.query(
+    `insert into rls_doctor_demo_safe.tasks (owner_id, title) values
+       ('00000000-0000-0000-0000-000000000001', 'safe mine')`
+  );
 
   const snapshot = await loadCatalog({ connectionString: auditorUrl, schemas: ["rls_doctor_demo", "rls_doctor_demo_safe"] });
   assertFact(snapshot.schemaPrivileges, (p) => p.schema === "rls_doctor_demo" && p.grantee === "authenticated" && p.privilege === "USAGE", "unsafe schema USAGE");
@@ -53,6 +68,30 @@ try {
   assertEqual(safeReport.summary.findings.high, 0, "safe high findings");
   assertEqual(safeReport.summary.findings.critical, 0, "safe critical findings");
   assertEqual(safeReport.summary.highestSeverity, "none", "safe highest severity");
+
+  const unsafeProbe = await runCli(["dist/cli.js", "probe", "--connection", auditorUrl, "--schema", "rls_doctor_demo", "--app-roles", "authenticated", "--json", "--fail-on", "high"]);
+  assertEqual(unsafeProbe.code, 1, "unsafe probe threshold exit");
+  assertEqual(unsafeProbe.stderr, "", "unsafe probe stderr");
+  const unsafeProbeReport = JSON.parse(unsafeProbe.stdout);
+  assert(
+    unsafeProbeReport.findings.some((finding) => finding.id === "probe-cross-owner-read" && finding.schema === "rls_doctor_demo" && finding.table === "orders" && finding.severity === "high"),
+    "probe did not flag cross-owner reads on rls_doctor_demo.orders"
+  );
+  const ordersProbe = unsafeProbeReport.probes.find((probe) => probe.table === "orders" && probe.role === "authenticated");
+  assertEqual(ordersProbe?.status, "rows", "orders probe status");
+  assertEqual(ordersProbe?.distinctOwners, 2, "orders probe distinct owners");
+  const tasksProbe = unsafeProbeReport.probes.find((probe) => probe.table === "tasks" && probe.role === "authenticated");
+  assertEqual(tasksProbe?.status, "denied", "tasks probe requires a table privilege");
+
+  const safeProbe = await runCli(["dist/cli.js", "probe", "--connection", auditorUrl, "--schema", "rls_doctor_demo_safe", "--app-roles", "authenticated", "--json", "--fail-on", "high"]);
+  assertEqual(safeProbe.code, 0, "safe probe threshold exit");
+  assertEqual(safeProbe.stderr, "", "safe probe stderr");
+  const safeProbeReport = JSON.parse(safeProbe.stdout);
+  assertEqual(safeProbeReport.summary.findings.high, 0, "safe probe high findings");
+  const safeTasksProbe = safeProbeReport.probes.find((probe) => probe.table === "tasks" && probe.role === "authenticated");
+  assertEqual(safeTasksProbe?.status, "rows", "safe tasks probe status");
+  assertEqual(safeTasksProbe?.distinctOwners, 1, "safe tasks probe stays scoped to auth.uid()");
+
   console.log("Integration test passed.");
 } catch (error) {
   console.error(redact(error instanceof Error ? error.message : String(error)));
