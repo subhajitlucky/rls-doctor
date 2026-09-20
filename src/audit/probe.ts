@@ -47,11 +47,45 @@ export function analyzeProbeResults(
     (left, right) =>
       left.schema.localeCompare(right.schema) ||
       left.table.localeCompare(right.table) ||
-      left.role.localeCompare(right.role)
+      left.role.localeCompare(right.role) ||
+      (left.subject ?? "").localeCompare(right.subject ?? "")
   );
 
   for (const probe of probes) {
     const location = `${probe.schema}.${probe.table}`;
+    const subjectContext = probe.subject === null ? "" : ` as subject ${probe.subject}`;
+
+    if (
+      probe.status === "rows" &&
+      probe.subject !== null &&
+      probe.foreignRows !== null &&
+      probe.foreignRows > 0
+    ) {
+      findings.push({
+        id: "probe-cross-subject-read",
+        severity: "high",
+        schema: probe.schema,
+        table: probe.table,
+        title: `Role ${probe.role} reads rows belonging to other users on ${location}`,
+        detail: `As subject ${probe.subject}, role ${probe.role} read ${probe.foreignRows} row(s) on ${location} whose ${probe.ownerColumn} is not ${probe.subject} (own rows: ${probe.ownRows ?? 0}, sampled ${probe.sampledRows} row(s)).`,
+        recommendation:
+          "Tighten the policy predicate so this identity can only read rows it owns or that were explicitly shared with it."
+      });
+      continue;
+    }
+
+    if (probe.status === "rows" && probe.subject !== null && probe.ownRows !== null) {
+      findings.push({
+        id: "probe-subject-reads-own-rows",
+        severity: "info",
+        schema: probe.schema,
+        table: probe.table,
+        title: `Subject ${probe.subject} can read its own rows on ${location}`,
+        detail: `As subject ${probe.subject}${subjectContext}, role ${probe.role} read ${probe.ownRows} owned row(s) and no rows owned by other subjects on ${location}.`,
+        recommendation: "No action needed if this access is intended."
+      });
+      continue;
+    }
 
     if (probe.status === "rows" && probe.distinctOwners !== null && probe.distinctOwners > 1) {
       findings.push({
@@ -74,7 +108,7 @@ export function analyzeProbeResults(
         schema: probe.schema,
         table: probe.table,
         title: `Role ${probe.role} can read rows on ${location}`,
-        detail: `As ${probe.role}, ${location} returned ${probe.sampledRows} row(s)${
+        detail: `As ${probe.role}${subjectContext}, ${location} returned ${probe.sampledRows} row(s)${
           probe.distinctOwners === null
             ? ""
             : ` across ${probe.distinctOwners} distinct ${probe.ownerColumn} value(s)`
@@ -91,7 +125,7 @@ export function analyzeProbeResults(
         schema: probe.schema,
         table: probe.table,
         title: `Role ${probe.role} cannot read ${location}`,
-        detail: `As ${probe.role}, reading ${location} was denied by table privileges.`,
+        detail: `As ${probe.role}${subjectContext}, reading ${location} was denied by table privileges.`,
         recommendation: "No action needed if this identity should not read this table."
       });
       continue;
@@ -104,7 +138,7 @@ export function analyzeProbeResults(
         schema: probe.schema,
         table: probe.table,
         title: `Role ${probe.role} sees no rows on ${location}`,
-        detail: `As ${probe.role}, ${location} returned zero rows, which is the expected result when RLS default-denies access.`,
+        detail: `As ${probe.role}${subjectContext}, ${location} returned zero rows, which is the expected result when RLS default-denies access.`,
         recommendation: "No action needed unless this identity is expected to read rows from this table."
       });
       continue;

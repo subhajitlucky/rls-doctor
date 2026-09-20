@@ -45,7 +45,8 @@ try {
   );
   await admin.query(
     `insert into rls_doctor_demo_safe.tasks (owner_id, title) values
-       ('00000000-0000-0000-0000-000000000001', 'safe mine')`
+       ('00000000-0000-0000-0000-000000000001', 'safe mine'),
+       ('00000000-0000-0000-0000-000000000002', 'safe theirs')`
   );
 
   const snapshot = await loadCatalog({ connectionString: auditorUrl, schemas: ["rls_doctor_demo", "rls_doctor_demo_safe"] });
@@ -93,6 +94,28 @@ try {
   const safeTasksProbe = safeProbeReport.probes.find((probe) => probe.table === "tasks" && probe.role === "authenticated");
   assertEqual(safeTasksProbe?.status, "rows", "safe tasks probe status");
   assertEqual(safeTasksProbe?.distinctOwners, 1, "safe tasks probe stays scoped to auth.uid()");
+
+  const subject = "00000000-0000-0000-0000-000000000002";
+  const subjectProbe = await runCli(["dist/cli.js", "probe", "--connection", auditorUrl, "--schema", "rls_doctor_demo", "--app-roles", "authenticated", "--subjects", subject, "--json", "--fail-on", "high"]);
+  assertEqual(subjectProbe.code, 1, "subject probe threshold exit");
+  assertEqual(subjectProbe.stderr, "", "subject probe stderr");
+  const subjectReport = JSON.parse(subjectProbe.stdout);
+  assert(
+    subjectReport.findings.some((finding) => finding.id === "probe-cross-subject-read" && finding.table === "orders" && finding.severity === "high"),
+    "subject probe did not flag cross-subject reads on rls_doctor_demo.orders"
+  );
+  const ordersSubjectProbe = subjectReport.probes.find((probe) => probe.table === "orders" && probe.subject === subject);
+  assertEqual(ordersSubjectProbe?.ownRows, 1, "subject probe own rows");
+  assertEqual(ordersSubjectProbe?.foreignRows, 1, "subject probe foreign rows");
+
+  const safeSubjectProbe = await runCli(["dist/cli.js", "probe", "--connection", auditorUrl, "--schema", "rls_doctor_demo_safe", "--app-roles", "authenticated", "--subjects", subject, "--json", "--fail-on", "high"]);
+  assertEqual(safeSubjectProbe.code, 0, "safe subject probe threshold exit");
+  assertEqual(safeSubjectProbe.stderr, "", "safe subject probe stderr");
+  const safeSubjectReport = JSON.parse(safeSubjectProbe.stdout);
+  assertEqual(safeSubjectReport.summary.findings.high, 0, "safe subject probe high findings");
+  const safeTasksSubject = safeSubjectReport.probes.find((probe) => probe.table === "tasks" && probe.subject === subject);
+  assertEqual(safeTasksSubject?.ownRows, 1, "safe subject probe resolves JWT claims per subject");
+  assertEqual(safeTasksSubject?.foreignRows, 0, "safe subject probe stays scoped to the subject");
 
   const sarifRun = await runCli(["dist/cli.js", "check", "--connection", auditorUrl, "--schema", "rls_doctor_demo", "--format", "sarif", "--fail-on", "high"]);
   assertEqual(sarifRun.code, 1, "sarif threshold exit");

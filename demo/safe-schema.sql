@@ -23,7 +23,11 @@ returns uuid
 language sql
 stable
 as $$
-  select '00000000-0000-0000-0000-000000000001'::uuid;
+  select coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub',
+    '00000000-0000-0000-0000-000000000001'
+  )::uuid;
 $$;
 
 create table rls_doctor_demo_safe.tasks (

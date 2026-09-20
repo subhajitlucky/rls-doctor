@@ -5,12 +5,15 @@ import type { ProbeExecutionResult, ProbeRunResult } from "../src/audit/types.js
 function probe(overrides: Partial<ProbeExecutionResult>): ProbeExecutionResult {
   return {
     role: "authenticated",
+    subject: null,
     schema: "public",
     table: "documents",
     status: "rows",
     sampledRows: 1,
     ownerColumn: "owner_id",
     distinctOwners: 1,
+    ownRows: null,
+    foreignRows: null,
     error: null,
     ...overrides
   };
@@ -104,5 +107,50 @@ describe("analyzeProbeResults", () => {
     expect(
       report.probes.map((item) => `${item.schema}.${item.table}:${item.role}`)
     ).toEqual(["app.accounts:app_user", "public.orders:app_user", "public.orders:web_user"]);
+  });
+
+  it("flags subject probes that read rows owned by other users", () => {
+    const subject = "00000000-0000-0000-0000-000000000002";
+    const report = analyze({
+      probes: [
+        probe({
+          subject,
+          distinctOwners: null,
+          ownRows: 1,
+          foreignRows: 2,
+          sampledRows: 3
+        })
+      ],
+      roleErrors: []
+    });
+
+    const finding = report.findings.find((item) => item.id === "probe-cross-subject-read");
+    expect(finding).toMatchObject({ id: "probe-cross-subject-read", severity: "high" });
+    expect(finding?.detail).toContain(subject);
+    expect(finding?.detail).toMatch(/2 row\(s\).*not/);
+    expect(shouldFailProbe(report, "high")).toBe(true);
+  });
+
+  it("reports subject probes limited to their own rows as informational", () => {
+    const subject = "00000000-0000-0000-0000-000000000001";
+    const report = analyze({
+      probes: [
+        probe({
+          subject,
+          distinctOwners: null,
+          ownRows: 2,
+          foreignRows: 0,
+          sampledRows: 2
+        })
+      ],
+      roleErrors: []
+    });
+
+    expect(report.findings[0]).toMatchObject({
+      id: "probe-subject-reads-own-rows",
+      severity: "info"
+    });
+    expect(shouldFailProbe(report, "high")).toBe(false);
+    expect(shouldFailProbe(report, "low")).toBe(false);
   });
 });

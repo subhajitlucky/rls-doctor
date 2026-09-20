@@ -148,14 +148,24 @@ rls-doctor probe --connection "$DATABASE_URL" --schema public \
   --app-roles authenticated app_user --owner-columns owner_id tenant_id --fail-on high
 ```
 
+Simulate specific Supabase users instead of only a role:
+
+```bash
+rls-doctor probe --connection "$DATABASE_URL" --schema public \
+  --app-roles authenticated \
+  --subjects 00000000-0000-0000-0000-000000000001 00000000-0000-0000-0000-000000000002 \
+  --fail-on high
+```
+
 What it does:
 
 - Connects with `begin ... read only` and always rolls back. Probes never insert, update, delete, or commit; they are safe to run against production read replicas.
 - Uses `SET LOCAL ROLE` to impersonate each `--app-roles` value. The audit connection must be a member of the target role or a superuser.
 - Samples up to `--sample-limit` rows per table (default 1000) and, when an owner column exists (`--owner-columns`, default `owner_id`, `user_id`, `tenant_id`, `account_id`), counts distinct owner values.
 - A role that reads rows spanning more than one owner/tenant value produces `probe-cross-owner-read` (High) — direct behavioral proof of cross-tenant exposure.
+- With `--subjects <uuid...>`, probes simulate Supabase identities by setting `request.jwt.claims` and `request.jwt.claim.sub` inside the transaction, so `auth.uid()` resolves to each subject. Rows readable by that subject whose owner column differs from the subject produce `probe-cross-subject-read` (High) — a direct "can user A read user B's rows?" answer.
 
-Probe findings: `probe-cross-owner-read` (High), `probe-role-unavailable` (Medium), `probe-error` (Low), and informational `probe-reads-rows`, `probe-reads-no-rows`, `probe-read-denied`. Exit codes match `check`: `1` when findings meet `--fail-on` (default `high`), `2` for runtime failures such as a missing `--app-roles`.
+Probe findings: `probe-cross-owner-read` and `probe-cross-subject-read` (High), `probe-role-unavailable` (Medium), `probe-error` (Low), and informational `probe-reads-rows`, `probe-subject-reads-own-rows`, `probe-reads-no-rows`, `probe-read-denied`. Exit codes match `check`: `1` when findings meet `--fail-on` (default `high`), `2` for runtime failures such as a missing `--app-roles` or an invalid `--subjects` value.
 
 ## What It Checks
 
