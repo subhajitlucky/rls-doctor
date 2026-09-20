@@ -14,6 +14,7 @@ export interface ProbeOptions {
   schemas: string[];
   appRoles: readonly string[];
   ownerColumns: readonly string[];
+  subjects?: readonly string[];
   tables?: readonly string[];
   sampleLimit?: number;
   statementTimeoutMs?: number;
@@ -57,6 +58,7 @@ export async function runProbes(options: ProbeOptions): Promise<ProbeRunResult> 
     });
 
     const targets = await loadProbeTargets(client, options, probeRoles);
+    const subjects: Array<string | null> = [null, ...(options.subjects ?? [])];
 
     for (const role of probeRoles) {
       await client.query("savepoint probe_role");
@@ -70,12 +72,23 @@ export async function runProbes(options: ProbeOptions): Promise<ProbeRunResult> 
         continue;
       }
 
-      for (const target of targets) {
-        probes.push(
-          await probeTable(client, role, target, options.sampleLimit ?? DEFAULT_SAMPLE_LIMIT)
-        );
+      for (const subject of subjects) {
+        await applyJwtClaims(client, subject, role);
+
+        for (const target of targets) {
+          probes.push(
+            await probeTable(
+              client,
+              role,
+              subject,
+              target,
+              options.sampleLimit ?? DEFAULT_SAMPLE_LIMIT
+            )
+          );
+        }
       }
 
+      await applyJwtClaims(client, null, role);
       await client.query("reset role");
       await client.query("release savepoint probe_role");
     }
@@ -156,55 +169,68 @@ async function loadProbeTargets(
 async function probeTable(
   client: pg.Client,
   role: string,
+  subject: string | null,
   target: ProbeTarget,
   sampleLimit: number
 ): Promise<ProbeExecutionResult> {
   const qualified = `${quoteIdentifier(target.schema)}.${quoteIdentifier(target.table)}`;
   const base = {
     role,
+    subject,
     schema: target.schema,
     table: target.table,
     ownerColumn: target.ownerColumn
   };
 
   try {
-    await client.query("savepoint probe_sample");
-    let sampled: pg.QueryResult<{ count: string }>;
-    try {
-      sampled = await client.query<{ count: string }>(
-        `select count(*)::text as count
-           from (select 1 from ${qualified} limit ${sampleLimit}) as sample`
-      );
-      await client.query("release savepoint probe_sample");
-    } catch (error) {
-      await client.query("rollback to savepoint probe_sample");
-      await client.query("release savepoint probe_sample");
-      throw error;
-    }
-    const sampledRows = Number(sampled.rows[0]?.count ?? 0);
+    const sampledRows = await countWithSavepoint(
+      client,
+      `select count(*)::text as count
+         from (select 1 from ${qualified} limit ${sampleLimit}) as sample`
+    );
 
     let distinctOwners: number | null = null;
+    let ownRows: number | null = null;
+    let foreignRows: number | null = null;
+
     if (target.ownerColumn !== null && sampledRows > 0) {
-      await client.query("savepoint probe_owners");
-      try {
-        const owners = await client.query<{ count: string }>(
-          `select count(distinct ${quoteIdentifier(target.ownerColumn)})::text as count
-             from (select ${quoteIdentifier(target.ownerColumn)} from ${qualified} limit ${sampleLimit}) as sample`
+      const column = quoteIdentifier(target.ownerColumn);
+
+      if (subject === null) {
+        distinctOwners = await countWithSavepoint(
+          client,
+          `select count(distinct ${column})::text as count
+             from (select ${column} from ${qualified} limit ${sampleLimit}) as sample`
         );
-        await client.query("release savepoint probe_owners");
-        distinctOwners = Number(owners.rows[0]?.count ?? 0);
-      } catch (error) {
-        await client.query("rollback to savepoint probe_owners");
-        await client.query("release savepoint probe_owners");
-        throw error;
+      } else {
+        ownRows = await countWithSavepoint(
+          client,
+          `select count(*)::text as count
+             from (select 1 from ${qualified} where (${column})::text = $1 limit ${sampleLimit}) as sample`,
+          [subject]
+        );
+        foreignRows = await countWithSavepoint(
+          client,
+          `select count(*)::text as count
+             from (select 1 from ${qualified} where (${column})::text is distinct from $1 limit ${sampleLimit}) as sample`,
+          [subject]
+        );
       }
     }
 
     const status: ProbeStatus = sampledRows > 0 ? "rows" : "none";
-    return { ...base, status, sampledRows, distinctOwners, error: null };
+    return { ...base, status, sampledRows, distinctOwners, ownRows, foreignRows, error: null };
   } catch (error) {
     if (isPermissionDenied(error)) {
-      return { ...base, status: "denied", sampledRows: 0, distinctOwners: null, error: null };
+      return {
+        ...base,
+        status: "denied",
+        sampledRows: 0,
+        distinctOwners: null,
+        ownRows: null,
+        foreignRows: null,
+        error: null
+      };
     }
 
     return {
@@ -212,8 +238,47 @@ async function probeTable(
       status: "error",
       sampledRows: 0,
       distinctOwners: null,
+      ownRows: null,
+      foreignRows: null,
       error: errorMessage(error)
     };
+  }
+}
+
+/**
+ * Simulates a Supabase identity by setting the JWT GUCs that auth.uid() reads.
+ * The settings are transaction-local and the whole probe transaction is rolled back.
+ */
+async function applyJwtClaims(
+  client: pg.Client,
+  subject: string | null,
+  role: string
+): Promise<void> {
+  const claims =
+    subject === null
+      ? ""
+      : JSON.stringify({ sub: subject, role, aud: "authenticated" });
+  await client.query("select set_config('request.jwt.claims', $1, true)", [claims]);
+  await client.query("select set_config('request.jwt.claim.sub', $1, true)", [
+    subject ?? ""
+  ]);
+}
+
+async function countWithSavepoint(
+  client: pg.Client,
+  sql: string,
+  params: readonly unknown[] = []
+): Promise<number> {
+  await client.query("savepoint probe_query");
+  try {
+    const result = await client.query<{ count: string }>(sql, [...params]);
+    await client.query("release savepoint probe_query");
+    return Number(result.rows[0]?.count ?? 0);
+  } catch (error) {
+    // Keep the surrounding transaction usable after a probe statement fails.
+    await client.query("rollback to savepoint probe_query");
+    await client.query("release savepoint probe_query");
+    throw error;
   }
 }
 

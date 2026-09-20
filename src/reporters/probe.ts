@@ -17,6 +17,13 @@ export function renderProbeTextReport(report: ProbeReport): string {
     grouped.set(key, existing);
   }
 
+  const labelWidth = Math.max(
+    20,
+    ...report.probes.map((probe) =>
+      probe.subject === null ? probe.role.length : probe.role.length + probe.subject.length + 1
+    )
+  );
+
   for (const [table, probes] of grouped) {
     lines.push(table);
     for (const probe of probes) {
@@ -26,11 +33,17 @@ export function renderProbeTextReport(report: ProbeReport): string {
         if (probe.distinctOwners !== null) {
           details.push(`${probe.distinctOwners} distinct ${probe.ownerColumn}`);
         }
+        if (probe.foreignRows !== null) {
+          details.push(
+            `${probe.foreignRows} foreign row(s), ${probe.ownRows ?? 0} own row(s) by ${probe.ownerColumn}`
+          );
+        }
       } else if (probe.status === "error" && probe.error !== null) {
         details.push(probe.error);
       }
+      const label = probe.subject === null ? probe.role : `${probe.role}@${probe.subject}`;
       const suffix = details.length > 0 ? `  ${details.join(", ")}` : "";
-      lines.push(`  ${probe.role.padEnd(20)} ${probe.status}${suffix}`);
+      lines.push(`  ${label.padEnd(labelWidth + 2)} ${probe.status}${suffix}`);
     }
     lines.push("");
   }

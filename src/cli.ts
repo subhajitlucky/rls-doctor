@@ -18,6 +18,7 @@ import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 const program = new Command();
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json") as { version: string };
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 program
   .name("rls-doctor")
@@ -169,6 +170,10 @@ program
   .option("-s, --schema <schema...>", "Schema names to probe.", ["public"])
   .option("--app-roles <role...>", "Application roles to impersonate with SET LOCAL ROLE.")
   .option(
+    "--subjects <uuid...>",
+    "Simulate these user IDs through Supabase-compatible request.jwt.claims while probing."
+  )
+  .option(
     "--owner-columns <column...>",
     "Owner or tenant columns used for cross-owner checks.",
     ["owner_id", "user_id", "tenant_id", "account_id"]
@@ -188,6 +193,7 @@ program
       const statementTimeoutMs = Number(options.statementTimeout);
       const sampleLimit = Number(options.sampleLimit);
       const appRoles = normalizeAppRoles(options.appRoles);
+      const subjects = normalizeSubjects(options.subjects);
 
       if (appRoles.length === 0) {
         throw new Error("--app-roles is required for probes.");
@@ -204,6 +210,7 @@ program
         schemas,
         appRoles,
         ownerColumns: normalizeColumns(options.ownerColumns),
+        ...(subjects.length > 0 ? { subjects } : {}),
         ...(options.tables === undefined ? {} : { tables: options.tables }),
         sampleLimit,
         statementTimeoutMs
@@ -248,12 +255,28 @@ interface ProbeCliOptions {
   connection?: string;
   schema: string[];
   appRoles?: string[];
+  subjects?: string[];
   ownerColumns: string[];
   tables?: string[];
   sampleLimit: string;
   statementTimeout: string;
   json?: boolean;
   failOn: string;
+}
+
+
+function normalizeSubjects(subjects: string[] | undefined): string[] {
+  const normalized = [
+    ...new Set((subjects ?? []).map((subject) => subject.trim()).filter((subject) => subject.length > 0))
+  ];
+
+  for (const subject of normalized) {
+    if (!UUID_PATTERN.test(subject)) {
+      throw new Error(`--subjects expects UUID values, received "${subject}".`);
+    }
+  }
+
+  return normalized;
 }
 
 function normalizeColumns(columns: string[]): string[] {

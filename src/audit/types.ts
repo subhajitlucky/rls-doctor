@@ -153,12 +153,15 @@ export interface ProbeTarget {
 
 export interface ProbeExecutionResult {
   role: string;
+  subject: string | null;
   schema: string;
   table: string;
   status: ProbeStatus;
   sampledRows: number;
   ownerColumn: string | null;
   distinctOwners: number | null;
+  ownRows: number | null;
+  foreignRows: number | null;
   error: string | null;
 }
 
