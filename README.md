@@ -92,6 +92,16 @@ Options:
 --json                       Print machine-readable JSON
 --fail-on <severity>         info, low, medium, high, critical, none. Default: high
 --statement-timeout <ms>     Catalog query timeout. Default: 10000
+--app-roles <role...>        Additional roles to treat as reachable application identities
+```
+
+By default only Supabase-style identities (`anon`, `anonymous`, `authenticated`) and
+`public` are treated as reachable application roles. On generic Postgres databases, pass
+your application roles so grants and memberships through them are analyzed with the same
+severity as `authenticated`:
+
+```bash
+rls-doctor check --connection "$DATABASE_URL" --schema public --app-roles app_user web_user --fail-on high
 ```
 
 Environment variable fallback (preferred; `DATABASE_URL` takes precedence):

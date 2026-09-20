@@ -25,6 +25,10 @@ program
   .option("--json", "Print machine-readable JSON output.")
   .option("--fail-on <severity>", "Exit with code 1 when this severity or higher exists.", "high")
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
+  .option(
+    "--app-roles <role...>",
+    "Additional application roles to treat as reachable identities, for example app_user or web_user."
+  )
   .action(async (options: CheckOptions) => {
     let connectionString: string | undefined;
 
@@ -33,6 +37,7 @@ program
       const schemas = normalizeSchemas(options.schema);
       const failOn = normalizeFailOn(options.failOn);
       const statementTimeoutMs = Number(options.statementTimeout);
+      const appRoles = normalizeAppRoles(options.appRoles);
 
       if (!Number.isFinite(statementTimeoutMs) || statementTimeoutMs <= 0) {
         throw new Error("--statement-timeout must be a positive number.");
@@ -41,10 +46,14 @@ program
       const snapshot = await loadCatalog({
         connectionString,
         schemas,
-        statementTimeoutMs
+        statementTimeoutMs,
+        ...(appRoles.length > 0 ? { appRoles } : {})
       });
 
-      const report = analyzeCatalog(snapshot, { schemas });
+      const report = analyzeCatalog(snapshot, {
+        schemas,
+        ...(appRoles.length > 0 ? { appRoles } : {})
+      });
       process.stdout.write(options.json ? renderJsonReport(report) : renderTextReport(report));
 
       if (shouldFail(report, failOn)) {
@@ -63,6 +72,10 @@ program
   .option("-c, --connection <url>", "Postgres connection string. Defaults to DATABASE_URL or SUPABASE_DB_URL.")
   .option("-s, --schema <schema...>", "Schema names to audit.", ["public"])
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
+  .option(
+    "--app-roles <role...>",
+    "Additional application roles to treat as reachable identities, for example app_user or web_user."
+  )
   .action(async (tableRef: string, options: ExplainOptions) => {
     let connectionString: string | undefined;
 
@@ -70,6 +83,7 @@ program
       connectionString = resolveConnectionString(options.connection);
       const schemas = normalizeSchemas(options.schema);
       const statementTimeoutMs = Number(options.statementTimeout);
+      const appRoles = normalizeAppRoles(options.appRoles);
 
       if (!Number.isFinite(statementTimeoutMs) || statementTimeoutMs <= 0) {
         throw new Error("--statement-timeout must be a positive number.");
@@ -78,10 +92,14 @@ program
       const snapshot = await loadCatalog({
         connectionString,
         schemas,
-        statementTimeoutMs
+        statementTimeoutMs,
+        ...(appRoles.length > 0 ? { appRoles } : {})
       });
 
-      const report = analyzeCatalog(snapshot, { schemas });
+      const report = analyzeCatalog(snapshot, {
+        schemas,
+        ...(appRoles.length > 0 ? { appRoles } : {})
+      });
       const table = getTableAudit(report, tableRef);
 
       if (!table) {
@@ -103,12 +121,14 @@ interface CheckOptions {
   json?: boolean;
   failOn: string;
   statementTimeout: string;
+  appRoles?: string[];
 }
 
 interface ExplainOptions {
   connection?: string;
   schema: string[];
   statementTimeout: string;
+  appRoles?: string[];
 }
 
 function normalizeSchemas(schemas: string[]): string[] {
@@ -119,6 +139,16 @@ function normalizeSchemas(schemas: string[]): string[] {
   }
 
   return [...new Set(normalized)];
+}
+
+function normalizeAppRoles(appRoles: string[] | undefined): string[] {
+  return [
+    ...new Set(
+      (appRoles ?? [])
+        .map((role) => role.trim())
+        .filter((role) => role.length > 0)
+    )
+  ];
 }
 
 function normalizeFailOn(value: string): Severity | "none" {

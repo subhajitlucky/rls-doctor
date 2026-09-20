@@ -18,6 +18,7 @@ export interface LoadCatalogOptions {
   connectionString: string;
   schemas: string[];
   statementTimeoutMs?: number;
+  appRoles?: readonly string[];
 }
 
 export interface TableRow {
@@ -152,7 +153,7 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<CatalogS
       roleMemberships
     };
 
-    const relevantTopology = filterRelevantRoleTopology(snapshot);
+    const relevantTopology = filterRelevantRoleTopology(snapshot, options.appRoles);
     await client.query("commit");
     transactionStarted = false;
 
@@ -252,13 +253,16 @@ export function mapLegacyRoleMembership(row: LegacyRoleMembershipRow): RoleMembe
   };
 }
 
-export function filterRelevantRoleTopology(snapshot: CatalogSnapshot): {
+export function filterRelevantRoleTopology(
+  snapshot: CatalogSnapshot,
+  appRoles: readonly string[] = []
+): {
   roles: RoleSnapshot[];
   roleMemberships: RoleMembershipSnapshot[];
 } {
   const roles = snapshot.roles ?? [];
   const roleMemberships = snapshot.roleMemberships ?? [];
-  const relevantNames = seedRelevantRoleNames(snapshot);
+  const relevantNames = seedRelevantRoleNames(snapshot, appRoles);
   const adjacency = new Map<string, Set<string>>();
 
   for (const membership of roleMemberships) {
@@ -292,13 +296,22 @@ export function filterRelevantRoleTopology(snapshot: CatalogSnapshot): {
   };
 }
 
-function seedRelevantRoleNames(snapshot: CatalogSnapshot): Set<string> {
+function seedRelevantRoleNames(
+  snapshot: CatalogSnapshot,
+  appRoles: readonly string[] = []
+): Set<string> {
   const names = new Set<string>();
+  const configuredAppRoles = new Set(
+    appRoles
+      .map((role) => role.trim().toLowerCase())
+      .filter((role) => role.length > 0)
+  );
 
   for (const role of snapshot.roles ?? []) {
     const applicationFacing =
       role.name !== "PUBLIC" &&
-      ["anon", "anonymous", "authenticated"].includes(role.name.toLowerCase());
+      (["anon", "anonymous", "authenticated"].includes(role.name.toLowerCase()) ||
+        configuredAppRoles.has(role.name.toLowerCase()));
     if (applicationFacing || role.superuser || role.bypassRls) {
       names.add(role.name);
     }

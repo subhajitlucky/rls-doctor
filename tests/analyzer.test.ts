@@ -130,6 +130,61 @@ describe("analyzeCatalog", () => {
     expect(publicUsageOwner.tables[0]?.findings[0]).toMatchObject({ id: "rls-disabled", severity: "medium" });
   });
 
+  it("treats configured app roles as reachable application identities", () => {
+    const snapshot: CatalogSnapshot = {
+      tables: [
+        {
+          schema: "app",
+          name: "orders",
+          owner: "owner",
+          rlsEnabled: false,
+          forceRls: false,
+          isPartitioned: false,
+          estimatedRows: null
+        }
+      ],
+      policies: [],
+      relationPrivileges: [
+        {
+          schema: "app",
+          table: "orders",
+          grantor: "owner",
+          grantee: "app_user",
+          privilege: "SELECT",
+          grantable: false
+        }
+      ],
+      schemaPrivileges: [
+        {
+          schema: "app",
+          grantor: "owner",
+          grantee: "app_user",
+          privilege: "USAGE",
+          grantable: false
+        }
+      ],
+      defaultPrivileges: [],
+      roles: [
+        { name: "app_user", superuser: false, bypassRls: false, inherits: true },
+        { name: "owner", superuser: false, bypassRls: false, inherits: true }
+      ],
+      roleMemberships: []
+    };
+
+    const withoutAppRoles = analyzeCatalog(snapshot, { schemas: ["app"] });
+    expect(withoutAppRoles.tables[0]?.findings[0]).toMatchObject({
+      id: "rls-disabled",
+      severity: "medium"
+    });
+
+    const withAppRoles = analyzeCatalog(snapshot, { schemas: ["app"], appRoles: ["APP_USER"] });
+    expect(withAppRoles.tables[0]?.findings[0]).toMatchObject({
+      id: "rls-disabled-exposed",
+      severity: "high"
+    });
+    expect(withAppRoles.tables[0]?.findings[0]?.detail).toMatch(/app_user/);
+  });
+
   it.each([
     ["direct", "authenticated", []],
     ["inherited", "reader", [{ role: "reader", member: "authenticated", inheritOption: true, setOption: false }]],

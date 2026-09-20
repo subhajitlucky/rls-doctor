@@ -133,4 +133,5 @@ export interface AuditReport {
 export interface AuditOptions {
   schemas: string[];
   generatedAt?: Date;
+  appRoles?: readonly string[];
 }
