@@ -90,7 +90,10 @@ Options:
 -c, --connection <url>       Postgres connection string
 -s, --schema <schema...>     Schema names to audit. Default: public
 --json                       Print machine-readable JSON
+--format <format>            text, json, or sarif. Default: text
 --fail-on <severity>         info, low, medium, high, critical, none. Default: high
+--baseline <path>            Compare with a prior JSON report; only new findings can fail
+--update-baseline            Write the current report to the --baseline path and exit 0
 --statement-timeout <ms>     Catalog query timeout. Default: 10000
 --app-roles <role...>        Additional roles to treat as reachable application identities
 ```
@@ -204,6 +207,49 @@ jobs:
 ```
 
 Full guide: [`docs/guides/github-actions.md`](docs/guides/github-actions.md)
+
+### GitHub Action
+
+A composite action is included at the repository root. It installs the published CLI, runs a check, writes the report, and fails the job according to `fail-on` (and only new findings when a baseline is provided).
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+
+steps:
+  - uses: actions/checkout@v5
+
+  - uses: subhajitlucky/rls-doctor@main
+    with:
+      connection: ${{ secrets.READONLY_DATABASE_URL }}
+      schema: public
+      format: sarif
+      output: rls-doctor.sarif
+      fail-on: high
+      app-roles: authenticated app_user
+
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: rls-doctor.sarif
+```
+
+The connection string is passed through the environment, not the command line. SARIF results carry `logicalLocations` (`schema.table`) and stable `partialFingerprints`, so code scanning can track findings across runs even though database tables are not files.
+
+### Baselines
+
+Adopt RLS Doctor on an existing database without failing on day one:
+
+```bash
+# Record the current findings once
+rls-doctor check --schema public --baseline rls-baseline.json --update-baseline
+
+# Afterwards, only new findings can fail the run
+rls-doctor check --schema public --baseline rls-baseline.json --fail-on high
+```
+
+Fingerprints are derived from the finding id, schema, table, and detail, so a changed predicate or privilege re-reports as a new finding. JSON reports include `baseline: { new, unchanged, resolved }` when a baseline is used.
 
 Exit behavior:
 

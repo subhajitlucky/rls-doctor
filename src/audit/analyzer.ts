@@ -1,3 +1,4 @@
+import { findingFingerprint } from "./fingerprint.js";
 import type {
   AuditOptions,
   AuditReport,
@@ -98,13 +99,29 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
   };
 }
 
-export function shouldFail(report: AuditReport, failOn: Severity | "none"): boolean {
+export interface FailOptions {
+  baselineFingerprints?: ReadonlySet<string>;
+}
+
+export function shouldFail(
+  report: AuditReport,
+  failOn: Severity | "none",
+  options: FailOptions = {}
+): boolean {
   if (failOn === "none") {
     return false;
   }
 
-  return severityOrder.some(
-    (severity) => severityRank[severity] >= severityRank[failOn] && report.summary.findings[severity] > 0
+  const threshold = severityRank[failOn];
+  const findings = [
+    ...report.schemaFindings,
+    ...report.tables.flatMap((table) => table.findings)
+  ];
+
+  return findings.some(
+    (finding) =>
+      severityRank[finding.severity] >= threshold &&
+      !options.baselineFingerprints?.has(findingFingerprint(finding))
   );
 }
 
