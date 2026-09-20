@@ -135,3 +135,57 @@ export interface AuditOptions {
   generatedAt?: Date;
   appRoles?: readonly string[];
 }
+
+export type ProbeStatus = "rows" | "none" | "denied" | "error";
+
+export interface ProbeTarget {
+  schema: string;
+  table: string;
+  ownerColumn: string | null;
+}
+
+export interface ProbeExecutionResult {
+  role: string;
+  schema: string;
+  table: string;
+  status: ProbeStatus;
+  sampledRows: number;
+  ownerColumn: string | null;
+  distinctOwners: number | null;
+  error: string | null;
+}
+
+export interface ProbeRoleError {
+  role: string;
+  message: string;
+}
+
+export interface ProbeRunResult {
+  probes: ProbeExecutionResult[];
+  roleErrors: ProbeRoleError[];
+}
+
+export interface ProbeFinding {
+  id: string;
+  severity: Severity;
+  schema: string | null;
+  table: string | null;
+  title: string;
+  detail: string;
+  recommendation: string;
+}
+
+export interface ProbeReport {
+  schemaVersion: "1.0";
+  generatedAt: string;
+  schemas: string[];
+  roles: string[];
+  summary: {
+    probes: number;
+    byStatus: Record<ProbeStatus, number>;
+    findings: Record<Severity, number>;
+    highestSeverity: HighestSeverity;
+  };
+  probes: ProbeExecutionResult[];
+  findings: ProbeFinding[];
+}

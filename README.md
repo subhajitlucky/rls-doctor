@@ -136,6 +136,24 @@ Next steps
   ...
 ```
 
+### `probe`
+
+Impersonate application roles in a rolled-back, read-only transaction and observe what rows they can actually read:
+
+```bash
+rls-doctor probe --connection "$DATABASE_URL" --schema public \
+  --app-roles authenticated app_user --owner-columns owner_id tenant_id --fail-on high
+```
+
+What it does:
+
+- Connects with `begin ... read only` and always rolls back. Probes never insert, update, delete, or commit; they are safe to run against production read replicas.
+- Uses `SET LOCAL ROLE` to impersonate each `--app-roles` value. The audit connection must be a member of the target role or a superuser.
+- Samples up to `--sample-limit` rows per table (default 1000) and, when an owner column exists (`--owner-columns`, default `owner_id`, `user_id`, `tenant_id`, `account_id`), counts distinct owner values.
+- A role that reads rows spanning more than one owner/tenant value produces `probe-cross-owner-read` (High) — direct behavioral proof of cross-tenant exposure.
+
+Probe findings: `probe-cross-owner-read` (High), `probe-role-unavailable` (Medium), `probe-error` (Low), and informational `probe-reads-rows`, `probe-reads-no-rows`, `probe-read-denied`. Exit codes match `check`: `1` when findings meet `--fail-on` (default `high`), `2` for runtime failures such as a missing `--app-roles`.
+
 ## What It Checks
 
 | Check | Severity | Why it matters |
