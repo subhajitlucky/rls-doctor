@@ -395,4 +395,42 @@ describe("filterRelevantRoleTopology", () => {
     ]);
     expect(result.roleMemberships).toEqual(roleMemberships.slice(0, 3));
   });
+
+  it("retains configured application roles and their membership neighborhoods", () => {
+    const role = (name: string) => ({
+      name,
+      superuser: false,
+      bypassRls: false,
+      inherits: true
+    });
+    const roleMemberships = [
+      { role: "web_user", member: "app_user", inheritOption: true, setOption: false },
+      { role: "unrelated_b", member: "unrelated_a", inheritOption: true, setOption: true }
+    ];
+
+    const defaultResult = filterRelevantRoleTopology({
+      tables: [],
+      policies: [],
+      relationPrivileges: [],
+      defaultPrivileges: [],
+      roles: [role("app_user"), role("web_user"), role("unrelated_a"), role("unrelated_b")],
+      roleMemberships
+    });
+    expect(defaultResult.roles).toEqual([]);
+    expect(defaultResult.roleMemberships).toEqual([]);
+
+    const configuredResult = filterRelevantRoleTopology(
+      {
+        tables: [],
+        policies: [],
+        relationPrivileges: [],
+        defaultPrivileges: [],
+        roles: [role("app_user"), role("web_user"), role("unrelated_a"), role("unrelated_b")],
+        roleMemberships
+      },
+      ["APP_USER"]
+    );
+    expect(configuredResult.roles.map((item) => item.name)).toEqual(["app_user", "web_user"]);
+    expect(configuredResult.roleMemberships).toEqual([roleMemberships[0]]);
+  });
 });

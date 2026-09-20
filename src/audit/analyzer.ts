@@ -28,6 +28,15 @@ const severityRank: Record<Severity, number> = {
 const severityOrder: Severity[] = ["info", "low", "medium", "high", "critical"];
 const publicLikeRoles = new Set(["public", "anon", "anonymous"]);
 const applicationRoleNames = new Set(["public", "anon", "anonymous", "authenticated"]);
+
+function normalizeAppRoleNames(appRoles: readonly string[] | undefined): Set<string> {
+  const names = new Set<string>();
+  for (const role of appRoles ?? []) {
+    const trimmed = role.trim();
+    if (trimmed.length > 0) names.add(trimmed.toLowerCase());
+  }
+  return names;
+}
 const rowAccessPrivileges = new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]);
 const truncatePrivilege = new Set(["TRUNCATE"]);
 
@@ -61,7 +70,7 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
   const schemaPrivileges = snapshot.schemaPrivileges;
   const roles = snapshot.roles ?? [];
   const roleMemberships = snapshot.roleMemberships ?? [];
-  const roleGraph = buildRoleGraph(snapshot, roles, roleMemberships);
+  const roleGraph = buildRoleGraph(snapshot, roles, roleMemberships, normalizeAppRoleNames(options.appRoles));
   const privilegesByTable = groupPrivilegesByTable(relationPrivileges);
   const schemaFindings = [
     ...auditDefaultPrivileges(defaultPrivileges, roleGraph),
@@ -447,7 +456,8 @@ function suggestedWritePolicySql(table: TableSnapshot, policy: PolicySnapshot): 
 function buildRoleGraph(
   snapshot: CatalogSnapshot,
   roles: RoleSnapshot[],
-  memberships: RoleMembershipSnapshot[]
+  memberships: RoleMembershipSnapshot[],
+  configuredAppRoles: ReadonlySet<string> = new Set()
 ): RoleGraph {
   const identityNames = new Set<string>(["anon", "anonymous", "authenticated"]);
   for (const role of roles) identityNames.add(role.name);
@@ -473,7 +483,7 @@ function buildRoleGraph(
   }
 
   const applicationRoles = [...identityNames]
-    .filter((name) => name !== "PUBLIC" && isApplicationRole(name))
+    .filter((name) => name !== "PUBLIC" && isApplicationRole(name, configuredAppRoles))
     .sort((left, right) => left.localeCompare(right));
   const graph: RoleGraph = {
     applicationRoles,
@@ -522,8 +532,9 @@ function inheritedClosure(graph: RoleGraph, sourceRole: string): Set<string> {
   return visited;
 }
 
-function isApplicationRole(role: string): boolean {
-  return applicationRoleNames.has(role.toLowerCase());
+function isApplicationRole(role: string, configuredAppRoles: ReadonlySet<string>): boolean {
+  const normalized = role.toLowerCase();
+  return applicationRoleNames.has(normalized) || configuredAppRoles.has(normalized);
 }
 
 function findBestAccess(graph: RoleGraph, targetRole: string): RoleAccess | undefined {
