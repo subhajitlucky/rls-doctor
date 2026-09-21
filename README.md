@@ -6,14 +6,15 @@
 
 `rls-doctor` is a Postgres and Supabase Row Level Security auditor for the command line.
 
-It connects to a database with a Postgres connection string, reads catalog metadata, and reports RLS risks before they ship to production.
+It connects to a database with a Postgres connection string, reads catalog metadata, and reports RLS risks before they ship to production. Beyond static checks, `probe` impersonates application roles in a rolled-back, read-only transaction and shows which rows they can actually read.
 
 - Status: Published CLI
 - Portfolio case study: https://subhajitpradhan.vercel.app/projects/rls-doctor
 - Inspect the implementation: `src/audit/analyzer.ts`, `scripts/run-integration.js`, and `.agents/skills/rls-doctor/SKILL.md`
 
 ```bash
-npx rls-doctor check --connection "$DATABASE_URL"
+npx rls-doctor check                 # reads DATABASE_URL or SUPABASE_DB_URL
+npx rls-doctor probe --app-roles authenticated   # behavioral cross-tenant proof
 ```
 
 Example output for a one-table snapshot:
@@ -56,14 +57,14 @@ Postgres RLS is one of the strongest tools for multi-tenant data isolation, but 
 Run without installing:
 
 ```bash
-npx rls-doctor check --connection "$DATABASE_URL"
+npx rls-doctor check
 ```
 
 Install globally:
 
 ```bash
 npm install -g rls-doctor
-rls-doctor check --connection "$DATABASE_URL"
+rls-doctor check
 ```
 
 Prefer `DATABASE_URL` or `SUPABASE_DB_URL` containing read-only audit credentials. Passing a secret with `--connection` can expose it in shell history and process listings. Connection errors are sanitized to remove URL credentials, but credentials should still be treated as secrets.
@@ -157,6 +158,15 @@ rls-doctor probe --connection "$DATABASE_URL" --schema public \
   --fail-on high
 ```
 
+Probe options:
+
+```txt
+--app-roles <role...>        Application roles to impersonate (required)
+--subjects <uuid...>         Supabase user ids to simulate via request.jwt.claims
+--owner-columns <col...>     Owner/tenant columns to compare (default: owner_id user_id tenant_id account_id)
+--sample-limit <n>           Rows sampled per table (default: 1000)
+```
+
 What it does:
 
 - Connects with `begin ... read only` and always rolls back. Probes never insert, update, delete, or commit; they are safe to run against production read replicas.
@@ -165,7 +175,7 @@ What it does:
 - A role that reads rows spanning more than one owner/tenant value produces `probe-cross-owner-read` (High) — direct behavioral proof of cross-tenant exposure.
 - With `--subjects <uuid...>`, probes simulate Supabase identities by setting `request.jwt.claims` and `request.jwt.claim.sub` inside the transaction, so `auth.uid()` resolves to each subject. Rows readable by that subject whose owner column differs from the subject produce `probe-cross-subject-read` (High) — a direct "can user A read user B's rows?" answer.
 
-Probe findings: `probe-cross-owner-read` and `probe-cross-subject-read` (High), `probe-role-unavailable` (Medium), `probe-error` (Low), and informational `probe-reads-rows`, `probe-subject-reads-own-rows`, `probe-reads-no-rows`, `probe-read-denied`. Exit codes match `check`: `1` when findings meet `--fail-on` (default `high`), `2` for runtime failures such as a missing `--app-roles` or an invalid `--subjects` value.
+Probe findings: `probe-cross-owner-read` and `probe-cross-subject-read` (High), `probe-role-unavailable` (Medium), `probe-error` (Low), and informational `probe-reads-rows`, `probe-subject-reads-own-rows`, `probe-reads-no-rows`, `probe-read-denied`. Exit codes match `check` (see [Exit behavior](#exit-behavior)).
 
 ## What It Checks
 
@@ -230,7 +240,7 @@ permissions:
 steps:
   - uses: actions/checkout@v5
 
-  - uses: subhajitlucky/rls-doctor@main
+  - uses: subhajitlucky/rls-doctor@v0.2.0
     with:
       connection: ${{ secrets.READONLY_DATABASE_URL }}
       schema: public
@@ -373,11 +383,17 @@ npm publish --access public
 - Markdown report output.
 - Policy diffing between branches.
 - Optional SQL migration suggestions.
-- Baseline files for known accepted findings.
-- SARIF output for GitHub code scanning.
 
 ## Safety
 
 `rls-doctor` sanitizes connection credentials from its own errors and only queries Postgres catalogs. Prefer a low-privilege user and an environment variable; a `--connection` value can still be exposed by the invoking shell or operating system.
 
 This is a security review aid, not a replacement for application-level authorization tests, grant reviews, or a full production security audit.
+
+## Requirements
+
+Node.js 20 or later.
+
+## License
+
+MIT
