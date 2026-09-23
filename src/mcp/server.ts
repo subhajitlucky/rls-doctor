@@ -20,7 +20,7 @@ const SERVER_INSTRUCTIONS = [
 
 export function createMcpServer(): Server {
   const server = new Server(
-    { name: MCP_SERVER_NAME, version: "0.3.0" },
+    { name: MCP_SERVER_NAME, version: "0.3.1" },
     { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
   );
   server.setRequestHandler(ListToolsRequestSchema, () => ({

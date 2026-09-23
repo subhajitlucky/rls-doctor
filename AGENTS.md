@@ -13,12 +13,14 @@ Postgres and Supabase Row Level Security auditor. Read-only by design.
 - is FORCE RLS on
 - do my app roles have TRUNCATE
 
+Use a trusted, already-installed  binary. Package acquisition is a separate pinned user-authorized step. Do not use an on-demand package runner as the audit step.
+
 ## Quick start
 
 ```bash
-npx rls-doctor check                                    # catalog audit
-npx rls-doctor explain public.profiles                  # one table
-npx rls-doctor probe --app-roles authenticated          # behavioral proof
+rls-doctor check                                    # catalog audit (already installed)
+rls-doctor explain public.profiles                  # one table
+rls-doctor probe --app-roles authenticated          # behavioral proof
 ```
 
 ## Tools
