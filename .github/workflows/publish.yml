@@ -1,6 +1,9 @@
 name: Publish
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -41,7 +44,26 @@ jobs:
       - name: Check package contents
         run: npm pack --dry-run
 
+      - name: Verify npm auth
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is empty. Create a granular access token with publish rights for rls-doctor and set the NPM_TOKEN repo secret."
+            exit 1
+          fi
+          npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Guard against republish
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Publishing rls-doctor@${VERSION}"
+          if npm view "rls-doctor@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::rls-doctor@${VERSION} is already on npm. Bump package.json version before publishing."
+            exit 1
+          fi
+
       - name: Publish
-        run: npm publish --provenance --access public --tag "${{ inputs.tag }}"
+        run: npm publish --provenance --access public --tag "${{ github.event.inputs.tag || 'latest' }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
