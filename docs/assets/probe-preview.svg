@@ -1,0 +1,26 @@
+<svg width="920" height="406" viewBox="0 0 920 406" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">RLS Doctor probe preview</title>
+  <desc id="desc">A terminal preview showing RLS Doctor probe impersonating application roles and detecting cross-owner row reads on orders while denying access to tasks.</desc>
+  <rect width="920" height="406" fill="#0f1115"/>
+  <rect x="24" y="24" width="872" height="358" rx="10" fill="#171a21" stroke="#2a2f3a"/>
+  <circle cx="52" cy="52" r="6" fill="#ff5f57"/>
+  <circle cx="74" cy="52" r="6" fill="#ffbd2e"/>
+  <circle cx="96" cy="52" r="6" fill="#28c840"/>
+  <text x="40" y="78" fill="#d7dde8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+    <tspan x="40" dy="0" fill="#7ee787" xml:space="preserve">$ rls-doctor probe --app-roles authenticated --owner-columns owner_id</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve"> </tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">rls_doctor_demo.orders</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">  authenticated@user-1   rows  sampled 2 row(s), 1 foreign row(s), 1 own row(s) by owner_id</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">  authenticated@user-2   rows  sampled 2 row(s), 1 foreign row(s), 1 own row(s) by owner_id</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve"> </tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">rls_doctor_demo.tasks</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">  authenticated@user-1   denied</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">  authenticated@user-2   denied</tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve"> </tspan>
+    <tspan x="40" dy="20" fill="#d7dde8" xml:space="preserve">Probe summary: 9 probe(s); by status {&quot;rows&quot;:6,&quot;none&quot;:0,&quot;denied&quot;:3,&quot;error&quot;:0}</tspan>
+    <tspan x="40" dy="20" fill="#ff6b6b" xml:space="preserve">Findings: 6 info, 0 low, 0 medium, 3 high, 0 critical (highest: high)</tspan>
+    <tspan x="40" dy="20" fill="#ffb86c" xml:space="preserve">- [high] probe-cross-owner-read rls_doctor_demo.orders: Role authenticated reads rows across 2 distinct owner_id values</tspan>
+    <tspan x="40" dy="20" fill="#ffb86c" xml:space="preserve">- [high] probe-cross-subject-read rls_doctor_demo.orders: Role authenticated reads rows belonging to other users</tspan>
+    <tspan x="40" dy="20" fill="#7ee787" xml:space="preserve">- [info] probe-read-denied rls_doctor_demo.tasks: Role authenticated cannot read rls_doctor_demo.tasks</tspan>
+  </text>
+</svg>

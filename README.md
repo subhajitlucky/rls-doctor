@@ -39,6 +39,8 @@ public.orders
 
 ![RLS Doctor terminal preview](docs/assets/terminal-preview.svg)
 
+![RLS Doctor probe preview](docs/assets/probe-preview.svg)
+
 ## Why It Matters
 
 Postgres RLS is one of the strongest tools for multi-tenant data isolation, but the failure modes are easy to miss during normal feature work:
