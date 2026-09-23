@@ -44,3 +44,5 @@ export type {
   TableAudit,
   TableSnapshot
 } from "./audit/types.js";
+
+export { createMcpServer, startMcpStdioServer, MCP_SERVER_NAME } from "./mcp/index.js";

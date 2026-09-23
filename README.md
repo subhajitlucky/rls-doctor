@@ -6,6 +6,19 @@
 
 `rls-doctor` is a Postgres and Supabase Row Level Security auditor for the command line.
 
+## When to use this
+
+You want this tool when you are asking any of:
+
+- **Is my Supabase RLS safe?**
+- **Can one user read another user's rows?** — `probe` impersonates app roles in a rolled-back transaction and shows real row exposure
+- **Do my policies leak tenant data?** — unconditional `using (true)`, missing `WITH CHECK`, broad `to public`
+- **Do my app roles have TRUNCATE?** / **Is FORCE RLS on?**
+- **Add an RLS check to CI** — one line, JSON or SARIF, baseline-aware
+
+It never mutates the database. Catalog analysis cannot prove application-level authorization.
+
+
 It connects to a database with a Postgres connection string, reads catalog metadata, and reports RLS risks before they ship to production. Beyond static checks, `probe` impersonates application roles in a rolled-back, read-only transaction and shows which rows they can actually read.
 
 - Status: Published CLI
@@ -53,6 +66,14 @@ Postgres RLS is one of the strongest tools for multi-tenant data isolation, but 
 - Sensitive tables do not use `FORCE ROW LEVEL SECURITY`.
 
 `rls-doctor` gives teams a repeatable local and CI check for those mistakes. It does not mutate your database and does not call Supabase management APIs.
+
+## MCP server
+
+Register the read-only MCP tools (`check_rls`, `probe_access`, `explain_table`) so an agent can call them directly:
+
+```bash
+claude mcp add rls-doctor -- npx -y rls-doctor mcp
+```
 
 ## Install
 

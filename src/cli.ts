@@ -230,6 +230,14 @@ program
     }
   });
 
+program
+  .command("mcp")
+  .description("Serve read-only RLS audits over the Model Context Protocol on stdio.")
+  .action(async () => {
+    const { startMcpStdioServer } = await import("./mcp/server.js");
+    await startMcpStdioServer();
+  });
+
 program.parseAsync(process.argv);
 
 interface CheckOptions {

@@ -1,0 +1,40 @@
+# RLS Doctor
+
+Postgres and Supabase Row Level Security auditor for the command line.
+
+## What it does
+
+Reads catalog metadata and reports RLS risks: disabled RLS on granted tables, unconditional `using (true)` policies, missing `WITH CHECK`, reachable `TRUNCATE`, disabled `FORCE ROW LEVEL SECURITY`, and broad default privileges. `probe` impersonates application roles in a rolled-back read-only transaction and shows which rows they can actually read.
+
+## Install
+
+```bash
+npx rls-doctor check
+```
+
+## One command
+
+```bash
+rls-doctor check                                    # catalog audit
+rls-doctor explain public.profiles                  # one table
+rls-doctor probe --app-roles authenticated          # behavioral proof
+```
+
+## What it does not do
+
+It never mutates the database. Probe runs inside a rolled-back transaction. It does not call Supabase management APIs and cannot see application-level authorization bugs.
+
+## Limits
+
+Catalog analysis cannot prove runtime authz. Probe results depend on seeded data — empty tables prove nothing.
+
+## For agents
+
+- Skill: `.claude/skills/rls-doctor/SKILL.md` (also `.agents/skills/`)
+- MCP: `claude mcp add rls-doctor -- npx -y rls-doctor mcp`
+
+## Docs
+
+- https://github.com/subhajitlucky/rls-doctor
+- https://www.npmjs.com/package/rls-doctor
+- https://subhajitpradhan.vercel.app/writing/five-postgres-rls-mistakes
