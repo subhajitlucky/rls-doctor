@@ -33,6 +33,10 @@ inputs:
     description: Optional path to a prior JSON report used as a baseline; only new findings can fail the run.
     required: false
     default: ""
+  upload:
+    description: "Upload SARIF findings to GitHub code scanning (true or false). Requires the security-events write permission."
+    required: false
+    default: "false"
   version:
     description: rls-doctor version to install from npm.
     required: false
@@ -72,3 +76,10 @@ runs:
         cat "${{ inputs.output }}"
         echo "rls-doctor exit code: $status"
         exit $status
+
+    - name: Upload SARIF to code scanning
+      if: ${{ inputs.upload == 'true' && inputs.format == 'sarif' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: rls-doctor
