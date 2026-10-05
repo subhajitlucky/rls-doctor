@@ -881,6 +881,62 @@ function isUnconditionalExpression(expression: string | null): boolean {
   return normalized === "" || normalized === "true" || normalized === "1 = 1" || normalized === "1=1";
 }
 
+/**
+ * Session GUC prefixes that `probe` sets itself before impersonating a role.
+ * Anything else read from the session is application middleware state that the
+ * probe transaction does not reproduce.
+ */
+const PROBE_SETTABLE_GUC_PREFIXES = ["request.jwt", "role", "session_authorization"];
+
+const CURRENT_SETTING_CALL = /current_setting\s*\(\s*'([^']+)'/gi;
+const SET_CONFIG_CALL = /set_config\s*\(\s*'([^']+)'/gi;
+
+function collectSessionGucNames(expression: string, into: Set<string>): void {
+  for (const pattern of [CURRENT_SETTING_CALL, SET_CONFIG_CALL]) {
+    pattern.lastIndex = 0;
+    let match = pattern.exec(expression);
+    while (match !== null) {
+      const name = match[1];
+      if (name !== undefined) into.add(name.toLowerCase());
+      match = pattern.exec(expression);
+    }
+  }
+}
+
+/**
+ * Returns the custom session settings a policy predicate reads, which `probe`
+ * cannot reproduce. A policy that depends on these evaluates to NULL (rather
+ * than true or false) when the middleware that normally sets them is absent, so
+ * a probe sees zero rows for a table that can leak rows in production.
+ */
+export function sessionDependentSettings(expression: string | null): string[] {
+  if (expression === null) {
+    return [];
+  }
+
+  const names = new Set<string>();
+  collectSessionGucNames(expression, names);
+
+  return [...names]
+    .filter((name) => !PROBE_SETTABLE_GUC_PREFIXES.some((prefix) => name.startsWith(prefix)))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+/** Settings a set of policies read that the probe transaction does not set. */
+export function policiesSessionDependency(
+  policies: readonly { usingExpression: string | null; withCheckExpression: string | null }[]
+): string[] {
+  const names = new Set<string>();
+  for (const policy of policies) {
+    collectSessionGucNames(policy.usingExpression ?? "", names);
+    collectSessionGucNames(policy.withCheckExpression ?? "", names);
+  }
+
+  return [...names]
+    .filter((name) => !PROBE_SETTABLE_GUC_PREFIXES.some((prefix) => name.startsWith(prefix)))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function tableKey(schema: string, table: string): string {
   return `${schema}.${table}`;
 }

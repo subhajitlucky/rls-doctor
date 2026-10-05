@@ -15,6 +15,7 @@ function probe(overrides: Partial<ProbeExecutionResult>): ProbeExecutionResult {
     ownRows: null,
     foreignRows: null,
     error: null,
+    sessionDependentSettings: [],
     ...overrides
   };
 }
@@ -152,5 +153,26 @@ describe("analyzeProbeResults", () => {
     });
     expect(shouldFailProbe(report, "high")).toBe(false);
     expect(shouldFailProbe(report, "low")).toBe(false);
+  });
+});
+
+describe("session-dependent policies", () => {
+  it("flags probes whose policies read settings the probe never sets", () => {
+    const report = analyze({
+      probes: [
+        probe({
+          status: "none",
+          sampledRows: 0,
+          sessionDependentSettings: ["app.tenant_id"]
+        })
+      ],
+      roleErrors: []
+    });
+
+    const finding = report.findings.find(
+      (item) => item.id === "probe-session-dependent-policy"
+    );
+    expect(finding).toMatchObject({ severity: "medium" });
+    expect(finding?.detail).toMatch(/app\.tenant_id/);
   });
 });

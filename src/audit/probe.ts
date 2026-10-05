@@ -55,6 +55,19 @@ export function analyzeProbeResults(
     const location = `${probe.schema}.${probe.table}`;
     const subjectContext = probe.subject === null ? "" : ` as subject ${probe.subject}`;
 
+    if (probe.sessionDependentSettings.length > 0) {
+      findings.push({
+        id: "probe-session-dependent-policy",
+        severity: "medium",
+        schema: probe.schema,
+        table: probe.table,
+        title: `Policies on ${location} depend on session settings the probe does not reproduce`,
+        detail: `As ${probe.role}${subjectContext}, ${location} reads session setting(s) ${probe.sessionDependentSettings.join(", ")} that the probe transaction never sets, so a "no rows" result may hide rows that leak in production when middleware sets them.`,
+        recommendation:
+          "Re-run the probe with those settings applied (e.g. set_config in the probe transaction), or verify the middleware always sets them before every query."
+      });
+    }
+
     if (
       probe.status === "rows" &&
       probe.subject !== null &&

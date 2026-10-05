@@ -1239,3 +1239,28 @@ describe("getTableAudit", () => {
     expect(getTableAudit(report, "profiles")?.schema).toBe("public");
   });
 });
+
+describe("sessionDependentSettings", () => {
+  it("collects custom GUCs read by policy predicates", async () => {
+    const { sessionDependentSettings, policiesSessionDependency } = await import(
+      "../src/audit/analyzer.js"
+    );
+    expect(
+      sessionDependentSettings("current_setting('app.tenant_id', true) = owner_id")
+    ).toEqual(["app.tenant_id"]);
+    expect(sessionDependentSettings("auth.uid() = owner_id")).toEqual([]);
+    expect(sessionDependentSettings(null)).toEqual([]);
+  });
+
+  it("ignores GUCs the probe sets itself", async () => {
+    const { policiesSessionDependency } = await import("../src/audit/analyzer.js");
+    expect(
+      policiesSessionDependency([
+        {
+          usingExpression: "current_setting('request.jwt.claim.sub', true) = owner::text",
+          withCheckExpression: "set_config('app.tenant', 'x', true)"
+        }
+      ])
+    ).toEqual(["app.tenant"]);
+  });
+});
