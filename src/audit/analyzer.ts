@@ -1,4 +1,5 @@
 import { findingFingerprint } from "./fingerprint.js";
+import { scoreAudit } from "./score.js";
 import type {
   AuditOptions,
   AuditReport,
@@ -94,6 +95,7 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
     generatedAt: generatedAt.toISOString(),
     schemas: options.schemas,
     summary: summarize(tables, schemaFindings, snapshot.policies.length),
+    score: scoreAudit(schemaFindings, tables),
     schemaFindings,
     tables
   };

@@ -5,6 +5,7 @@ import type {
   Severity,
   TableAudit
 } from "../audit/types.js";
+import { RLS_SCORE_LABEL } from "./score.js";
 
 const severityLabel: Record<HighestSeverity, string> = {
   none: "NONE",
@@ -28,6 +29,7 @@ export function renderTextReport(report: AuditReport): string {
   lines.push(
     `Findings: critical ${report.summary.findings.critical}, high ${report.summary.findings.high}, medium ${report.summary.findings.medium}, low ${report.summary.findings.low}, info ${report.summary.findings.info}`
   );
+  lines.push(`${RLS_SCORE_LABEL}: ${report.score.value}/100`);
   if (report.baseline !== undefined) {
     lines.push(
       `Baseline: ${report.baseline.new} new, ${report.baseline.unchanged} unchanged, ${report.baseline.resolved} resolved`

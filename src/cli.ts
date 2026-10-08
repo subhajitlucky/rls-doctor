@@ -13,6 +13,7 @@ import { runProbes } from "./db/probe.js";
 import { renderJsonReport } from "./reporters/json.js";
 import { renderProbeJsonReport, renderProbeTextReport } from "./reporters/probe.js";
 import { renderSarifReport } from "./reporters/sarif.js";
+import { renderScoreOutput } from "./reporters/score.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 
 const program = new Command();
@@ -35,6 +36,8 @@ program
   .option("--format <format>", "Output format: text, json, or sarif.")
   .option("--baseline <path>", "Compare findings with a prior JSON report; only new findings can fail the run.")
   .option("--update-baseline", "Write the current report to the --baseline path and exit 0.", false)
+  .option("--score", "Print only the RLS Score, for example RLS Score: 34/100.", false)
+  .option("--badge", "Print a shields.io badge URL for the RLS Score.", false)
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
   .option(
     "--app-roles <role...>",
@@ -90,12 +93,14 @@ program
         return;
       }
 
-      const output =
+      const scoreOutput = renderScoreOutput(report, options);
+      const output = scoreOutput ?? (
         format === "json"
           ? renderJsonReport(report)
           : format === "sarif"
             ? renderSarifReport(report, { toolVersion: packageJson.version })
-            : renderTextReport(report);
+            : renderTextReport(report)
+      );
       process.stdout.write(output);
 
       const baselineFingerprints =
@@ -250,6 +255,8 @@ interface CheckOptions {
   format?: string;
   baseline?: string;
   updateBaseline?: boolean;
+  score?: boolean;
+  badge?: boolean;
 }
 
 interface ExplainOptions {

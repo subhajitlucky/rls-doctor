@@ -127,11 +127,21 @@ export interface BaselineSummary {
   resolved: number;
 }
 
+export type ScoreBand = "red" | "yellow" | "green";
+
+export interface AuditScore {
+  value: number;
+  band: ScoreBand;
+  findingPenalty: number;
+  coveragePenalty: number;
+}
+
 export interface AuditReport {
   schemaVersion: "1.0";
   generatedAt: string;
   schemas: string[];
   summary: AuditSummary;
+  score: AuditScore;
   schemaFindings: SchemaFinding[];
   tables: TableAudit[];
   baseline?: BaselineSummary;

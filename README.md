@@ -23,6 +23,7 @@ Schemas: public
 
 Summary: 1 tables, 0 policies, highest risk HIGH
 Findings: critical 0, high 1, medium 0, low 0, info 0
+RLS Score: 90/100
 
 public.orders
   RLS disabled; force RLS disabled; 0 policies
@@ -94,6 +95,8 @@ rls-doctor probe --app-roles authenticated --owner-columns tenant_id
 --fail-on <severity>         info, low, medium, high, critical, none. Default: high
 --baseline <path>            Compare with a prior JSON report; only new findings fail
 --update-baseline            Write the current report to --baseline and exit 0
+--score                      Print only the RLS Score
+--badge                      Print a shields.io badge URL for the RLS Score
 --statement-timeout <ms>     Catalog query timeout. Default: 10000
 --app-roles <role...>        Extra roles to treat as reachable application identities
 ```
@@ -192,6 +195,22 @@ rls-doctor check --schema public --baseline rls-baseline.json --fail-on high
 ```
 
 Fingerprints derive from finding id, schema, table, and detail — so a changed predicate or privilege correctly re-reports as new. JSON reports include `baseline: { new, unchanged, resolved }`.
+
+## RLS Score
+
+Every report carries a deterministic score: `100` minus severity penalties —
+critical 25, high 10, medium 4, low 1, info 0 — clamped to 0–100. Bands:
+green ≥ 80, yellow ≥ 50, red < 50. The score never replaces the report:
+inspect the findings before calling a database safe.
+
+```bash
+rls-doctor check --score    # RLS Score: 34/100
+rls-doctor check --badge    # https://img.shields.io/badge/RLS%20Score-34%2F100-red
+```
+
+`--score` and `--badge` print only the score or badge; exit codes still follow
+`--fail-on`. JSON reports always include the `score` object with its
+`findingPenalty` breakdown.
 
 ### Exit behavior
 

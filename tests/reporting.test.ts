@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { analyzeCatalog } from "../src/audit/analyzer.js";
 import { loadBaseline } from "../src/audit/baseline.js";
+import { scoreAudit } from "../src/audit/score.js";
 import {
   compareWithBaseline,
   findingFingerprint,
@@ -58,6 +59,7 @@ function reportWith(findings: Finding[]): AuditReport {
       findings: { info: 0, low: 0, medium: findings.length, high: 0, critical: 0 },
       highestSeverity: findings.length > 0 ? "medium" : "none"
     },
+    score: scoreAudit([], [table]),
     schemaFindings: [],
     tables: [table]
   };

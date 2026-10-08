@@ -1,5 +1,6 @@
 export { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
 export type { FailOptions } from "./audit/analyzer.js";
+export { bandForScore, scoreAudit, SEVERITY_PENALTIES } from "./audit/score.js";
 export { isAuditReport, loadBaseline } from "./audit/baseline.js";
 export type { AuditBaseline } from "./audit/baseline.js";
 export {
@@ -18,10 +19,13 @@ export { renderJsonReport } from "./reporters/json.js";
 export { renderProbeJsonReport, renderProbeTextReport } from "./reporters/probe.js";
 export { renderSarifReport } from "./reporters/sarif.js";
 export type { SarifRenderOptions } from "./reporters/sarif.js";
+export { renderScoreLine, scoreBadgeUrl } from "./reporters/score.js";
+export type { ScoreRenderOptions } from "./reporters/score.js";
 export { renderExplainReport, renderTextReport } from "./reporters/text.js";
 export type {
   AuditOptions,
   AuditReport,
+  AuditScore,
   BaselineSummary,
   CatalogSnapshot,
   DefaultPrivilegeSnapshot,
@@ -40,6 +44,7 @@ export type {
   RoleSnapshot,
   SchemaPrivilegeSnapshot,
   SchemaFinding,
+  ScoreBand,
   Severity,
   TableAudit,
   TableSnapshot
