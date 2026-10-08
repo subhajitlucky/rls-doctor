@@ -4,9 +4,11 @@
 [![npm](https://img.shields.io/npm/v/rls-doctor.svg)](https://www.npmjs.com/package/rls-doctor)
 [![npm downloads](https://img.shields.io/npm/dm/rls-doctor.svg)](https://www.npmjs.com/package/rls-doctor)
 
-**Can user A read user B's rows? Get a proven answer, not an opinion.**
+**Don't trust your RLS. Prove it.**
 
-Row Level Security is one of Postgres's strongest isolation tools, and one of the easiest to leave half-configured. You enable RLS, add a policy, and move on — but policies OR-combine, `WITH CHECK` silently falls back to `USING`, table owners bypass RLS entirely, and `TRUNCATE` is never protected at all.
+![RLS Doctor probe preview](docs/assets/probe-preview.svg)
+
+Can user A read user B's rows? Row Level Security is one of Postgres's strongest isolation tools, and one of the easiest to leave half-configured. You enable RLS, add a policy, and move on — but policies OR-combine, `WITH CHECK` silently falls back to `USING`, table owners bypass RLS entirely, and `TRUNCATE` is never protected at all.
 
 `rls-doctor` reads your catalog and tells you what's actually reachable. And with `probe`, it stops analyzing and just *shows you*, impersonating your app roles in a transaction it always rolls back.
 
@@ -55,8 +57,6 @@ It sets `request.jwt.claims` inside the transaction, so `auth.uid()` resolves to
 - [high] probe-cross-subject-read rls_doctor_demo.orders:
   Role authenticated reads rows belonging to other users
 ```
-
-![RLS Doctor probe preview](docs/assets/probe-preview.svg)
 
 **It never mutates anything.** `probe` opens `begin ... read only` and always rolls back — safe against a production read replica.
 

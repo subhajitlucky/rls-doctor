@@ -1,6 +1,6 @@
 # RLS Doctor
 
-Postgres and Supabase Row Level Security auditor for the command line.
+Don't trust your RLS. Prove it. Read-only Postgres and Supabase Row Level Security audit with a rolled-back probe that proves cross-tenant reads.
 
 ## What it does
 
