@@ -1,4 +1,5 @@
 import pg from "pg";
+import { policiesSessionDependency } from "../audit/analyzer.js";
 import type {
   ProbeExecutionResult,
   ProbeRoleError,
@@ -179,7 +180,8 @@ async function probeTable(
     subject,
     schema: target.schema,
     table: target.table,
-    ownerColumn: target.ownerColumn
+    ownerColumn: target.ownerColumn,
+    sessionDependentSettings: await tableSessionDependency(client, target.schema, target.table)
   };
 
   try {
@@ -242,6 +244,32 @@ async function probeTable(
       foreignRows: null,
       error: errorMessage(error)
     };
+  }
+}
+
+/**
+ * Reads the policy predicates guarding a table and returns the custom session
+ * settings they depend on that the probe transaction does not reproduce.
+ * Falls back to [] when the catalog is not readable (e.g. restricted role).
+ */
+async function tableSessionDependency(
+  client: pg.Client,
+  schema: string,
+  table: string
+): Promise<string[]> {
+  try {
+    const policies = await client.query<{
+      usingExpression: string | null;
+      withCheckExpression: string | null;
+    }>(
+      `select qual as "usingExpression", with_check as "withCheckExpression"
+         from pg_policies
+        where schemaname = $1 and tablename = $2`,
+      [schema, table]
+    );
+    return policiesSessionDependency(policies.rows);
+  } catch {
+    return [];
   }
 }
 

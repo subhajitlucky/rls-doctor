@@ -163,6 +163,7 @@ export interface ProbeExecutionResult {
   ownRows: number | null;
   foreignRows: number | null;
   error: string | null;
+  sessionDependentSettings: string[];
 }
 
 export interface ProbeRoleError {

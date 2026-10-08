@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 640px; overflow: hidden;
+    background: #0f1115;
+    font-family: "DejaVu Sans Mono", "SF Mono", Menlo, Consolas, monospace;
+    color: #e6e9ef;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 88px;
+  }
+  .brand { font-size: 22px; letter-spacing: 6px; color: #8b93a3; text-transform: uppercase; margin-bottom: 28px; }
+  .brand .dot { color: #ff5f57; }
+  h1 { font-size: 74px; line-height: 1.05; font-weight: 700; letter-spacing: -2px; }
+  h1 .accent { color: #4ade80; }
+  .card {
+    margin-top: 44px;
+    background: #171a21; border: 1px solid #2a2f3a; border-radius: 12px;
+    padding: 26px 30px;
+    font-size: 23px; line-height: 1.65;
+  }
+  .prompt { color: #8b93a3; }
+  .prompt .cmd { color: #e6e9ef; }
+  .high { color: #ff5f57; font-weight: 700; }
+  .detail { color: #aeb6c4; }
+  .footer { margin-top: 26px; display: flex; gap: 34px; font-size: 20px; color: #6b7280; }
+  .footer b { color: #4ade80; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="brand">RLS<span class="dot">.</span>DOCTOR</div>
+  <h1>Don't trust your RLS.<br><span class="accent">Prove it.</span></h1>
+  <div class="card">
+    <div class="prompt">$ <span class="cmd">rls-doctor probe --app-roles authenticated</span></div>
+    <div><span class="high">[high]</span> probe-cross-owner-read public.orders</div>
+    <div class="detail">&nbsp;&nbsp;Role authenticated reads rows across 2 distinct owner_id values</div>
+  </div>
+  <div class="footer">
+    <span><b>read-only</b> catalog</span>
+    <span><b>rolled back</b> transactions</span>
+    <span>npx rls-doctor</span>
+  </div>
+</body>
+</html>
