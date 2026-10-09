@@ -28,6 +28,7 @@ export interface CoverageReceipt {
     fingerprints: string[];
   };
   suppressed: number;
+  shadow?: boolean;
   digest: { algorithm: "sha256"; value: string };
   signature?: ReceiptSignature;
 }
@@ -55,8 +56,10 @@ export function receiptDigest(body: ReceiptBody): string {
 export interface BuildReceiptOptions {
   issuedAt?: Date;
   privateKeyPem?: string;
-  source: "catalog" | "schema-file";
+  source: "catalog" | "schema-file" | "shadow";
   toolVersion: string;
+  shadow?: boolean;
+  additionalLimitations?: readonly string[];
 }
 
 /**
@@ -65,7 +68,7 @@ export interface BuildReceiptOptions {
  * optional and proves the holder of the private key issued the receipt.
  */
 export function buildReceipt(report: AuditReport, options: BuildReceiptOptions): CoverageReceipt {
-  const limitations = report.limitations ?? [];
+  const limitations = [...(report.limitations ?? []), ...(options.additionalLimitations ?? [])];
   const bySeverity = { ...report.summary.findings };
   const body: ReceiptBody = {
     receiptVersion: RECEIPT_VERSION,
@@ -73,13 +76,14 @@ export function buildReceipt(report: AuditReport, options: BuildReceiptOptions):
     issuedAt: (options.issuedAt ?? new Date()).toISOString(),
     subject: { root: report.schemas.join(", "), scope: options.source },
     score: { value: report.score.value, band: report.score.band },
-    coverage: { complete: limitations.length === 0, limitations: [...limitations] },
+    coverage: { complete: limitations.length === 0, limitations },
     findings: {
       total: Object.values(bySeverity).reduce((sum, count) => sum + count, 0),
       bySeverity,
       fingerprints: reportFindingFingerprints(report),
     },
     suppressed: 0,
+    ...(options.shadow === true ? { shadow: true } : {}),
   };
 
   const receipt: CoverageReceipt = {
@@ -164,6 +168,7 @@ function receiptSummary(receipt: CoverageReceipt): string {
   const lines = [
     `receipt: ${receipt.tool.name} ${receipt.tool.version} · issued ${receipt.issuedAt}`,
     `subject: ${receipt.subject.root} (scope=${receipt.subject.scope})`,
+    ...(receipt.shadow === true ? ["environment: shadow (disposable world)"] : []),
     `score: ${receipt.score.value}/100 (${receipt.score.band})`,
     `coverage: ${receipt.coverage.complete ? "complete" : "incomplete"}`,
   ];

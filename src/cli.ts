@@ -17,6 +17,7 @@ import { renderSarifReport } from "./reporters/sarif.js";
 import { renderScoreOutput } from "./reporters/score.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 import { buildReceipt, serializeReceipt, verifyReceipt } from "./receipts/receipt.js";
+import { runShadow } from "./shadow/runner.js";
 
 const program = new Command();
 const require = createRequire(import.meta.url);
@@ -313,6 +314,44 @@ program
   });
 
 program
+  .command("shadow")
+  .description("Replay migration files in a disposable PostgreSQL and compare static vs live analysis.")
+  .option(
+    "--schema-file <path...>",
+    "SQL schema or migration files to replay, in order; repeatable or space-separated."
+  )
+  .option("--seed <path>", "Optional seed SQL; when present, probe runs too.")
+  .option(
+    "--app-roles <role...>",
+    "Roles to probe when --seed is provided.",
+    ["authenticated"]
+  )
+  .option("--fail-on <severity>", "Exit with code 1 when live findings reach this severity.", "high")
+  .option("--receipt <path>", "Write a portable coverage receipt (marked as shadow).")
+  .option("--receipt-key <path>", "Sign the receipt with an Ed25519 private key (PEM).")
+  .action(async (options: ShadowCliOptions) => {
+    try {
+      const failOn = normalizeFailOn(options.failOn);
+      const privateKeyPem =
+        options.receiptKey === undefined ? undefined : await readFile(options.receiptKey, "utf8");
+      const outcome = await runShadow({
+        schemaFiles: options.schemaFile ?? [],
+        ...(options.seed === undefined ? {} : { seedFile: options.seed }),
+        ...(options.appRoles === undefined ? {} : { appRoles: normalizeAppRoles(options.appRoles) }),
+        failOn,
+        toolVersion: packageJson.version,
+        ...(options.receipt === undefined ? {} : { receipt: options.receipt }),
+        ...(privateKeyPem === undefined ? {} : { receiptKeyPem: privateKeyPem })
+      });
+      process.stdout.write(outcome.output);
+      process.exitCode = outcome.exitCode;
+    } catch (error) {
+      process.stderr.write(`rls-doctor: ${formatCliError(error)}\n`);
+      process.exitCode = 2;
+    }
+  });
+
+program
   .command("mcp")
   .description("Serve read-only RLS audits over the Model Context Protocol on stdio.")
   .action(async () => {
@@ -357,6 +396,15 @@ interface ProbeCliOptions {
   statementTimeout: string;
   json?: boolean;
   failOn: string;
+}
+
+interface ShadowCliOptions {
+  schemaFile?: string[];
+  seed?: string;
+  appRoles?: string[];
+  failOn: string;
+  receipt?: string;
+  receiptKey?: string;
 }
 
 

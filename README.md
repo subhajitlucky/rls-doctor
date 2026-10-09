@@ -78,6 +78,7 @@ Requires Node.js 20 or later. Prefer `DATABASE_URL` or `SUPABASE_DB_URL` with re
 | `check` | Audit one or more schemas |
 | `explain <table>` | Full detail on a single table |
 | `probe` | Impersonate app roles and prove actual row access |
+| `shadow` | Replay migrations in a disposable Postgres and compare static vs live |
 | `demo` | Spin up a disposable Postgres and prove a cross-tenant leak |
 | `mcp` | Serve read-only MCP tools over stdio |
 
@@ -240,6 +241,23 @@ Supported: `CREATE SCHEMA/TABLE/ROLE/USER/POLICY`, `ALTER TABLE` RLS and
 `FORCE ROW LEVEL SECURITY`, `GRANT`/`REVOKE` on tables, schemas, and roles,
 `ALTER DEFAULT PRIVILEGES`, `DROP` of the same, and unconditional role
 creation inside `DO` blocks.
+
+## Shadow verification
+
+`shadow` replays your migration files in a disposable PostgreSQL container,
+runs the real catalog audit — and `probe` when seed data is provided — then
+compares the offline analysis with the database's actual state:
+
+```bash
+rls-doctor shadow --schema-file supabase/migrations/*.sql --seed seed.sql --fail-on high
+```
+
+- Prints how many findings matched between static and live analysis, and
+  lists any disagreement in either direction — a parser-coverage fact, never
+  a guessed finding.
+- The container is always removed; the audited database is never touched.
+- `--receipt` writes a receipt marked `scope=shadow` and
+  `environment: shadow (disposable world)`.
 
 ### Exit behavior
 

@@ -1,6 +1,3 @@
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { promisify } from "node:util";
 import pg from "pg";
 import { analyzeCatalog } from "../audit/analyzer.js";
 import { analyzeProbeResults } from "../audit/probe.js";
@@ -9,13 +6,11 @@ import { loadCatalog } from "../db/catalog.js";
 import { runProbes } from "../db/probe.js";
 import { renderProbeTextReport } from "../reporters/probe.js";
 import { renderTextReport } from "../reporters/text.js";
+import { dockerAvailable, redact, withDisposablePostgres } from "../shadow/postgres.js";
 import { DEMO_REPLAY_OUTPUT } from "./fixture.js";
 import { DEMO_SEED_SQL, DEMO_UNSAFE_SCHEMA_SQL } from "./schema.js";
 
-const execFileAsync = promisify(execFile);
 const DEMO_SCHEMA = "rls_doctor_demo";
-const DEMO_IMAGE = process.env.RLS_DOCTOR_DEMO_IMAGE ?? "postgres:16-alpine";
-const READY_TIMEOUT_MS = 60_000;
 const OWNER_COLUMNS = ["owner_id", "user_id", "tenant_id", "account_id"];
 
 export interface DemoOutcome {
@@ -86,45 +81,8 @@ function replayOutput(reason: string): string {
   ].join("\n");
 }
 
-async function dockerAvailable(): Promise<boolean> {
-  try {
-    await execFileAsync("docker", ["info"], { timeout: 10_000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function liveDemo(): Promise<string> {
-  const container = `rls-doctor-demo-${randomUUID()}`;
-  let connectionString: string | undefined;
-
-  try {
-    await docker([
-      "run",
-      "--rm",
-      "-d",
-      "--name",
-      container,
-      "-e",
-      "POSTGRES_USER=postgres",
-      "-e",
-      "POSTGRES_PASSWORD=postgres",
-      "-e",
-      "POSTGRES_DB=rls_doctor",
-      "-p",
-      "127.0.0.1::5432",
-      DEMO_IMAGE,
-    ]);
-
-    const mapping = (await docker(["port", container, "5432/tcp"])).trim();
-    const port = mapping.slice(mapping.lastIndexOf(":") + 1);
-    if (!/^\d+$/.test(port)) {
-      throw new Error("Docker returned an invalid PostgreSQL port mapping.");
-    }
-    connectionString = `postgres://postgres:postgres@127.0.0.1:${port}/rls_doctor`;
-    await waitForPostgres(connectionString);
-
+  return withDisposablePostgres(async (connectionString) => {
     const admin = new pg.Client({ connectionString });
     await admin.connect();
     try {
@@ -145,44 +103,5 @@ async function liveDemo(): Promise<string> {
     const probe = analyzeProbeResults(run, { schemas: [DEMO_SCHEMA], roles: ["authenticated"] });
 
     return renderDemoOutput(audit, probe);
-  } finally {
-    await docker(["rm", "-f", container]).catch(() => undefined);
-  }
-}
-
-async function waitForPostgres(url: string): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < READY_TIMEOUT_MS) {
-    const client = new pg.Client({ connectionString: url });
-    try {
-      await client.connect();
-      await client.query("select 1");
-      await client.end();
-      return;
-    } catch {
-      await client.end().catch(() => undefined);
-      await sleep(500);
-    }
-  }
-  throw new Error("Timed out waiting for the disposable PostgreSQL container.");
-}
-
-async function docker(args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("docker", args, { maxBuffer: 1024 * 1024 });
-    return stdout;
-  } catch (error) {
-    const stderr = typeof error === "object" && error !== null && "stderr" in error
-      ? String((error as { stderr?: string }).stderr).trim()
-      : String(error);
-    throw new Error(`Docker command failed: ${redact(stderr)}`);
-  }
-}
-
-function redact(value: string): string {
-  return value.replaceAll("postgres:postgres", "[redacted]");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  });
 }

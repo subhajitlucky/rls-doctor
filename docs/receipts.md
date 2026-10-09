@@ -19,12 +19,13 @@ rls-doctor verify-receipt receipt.json                           # exit 0 valid,
 | --- | --- |
 | `tool` | name and version of the issuing tool |
 | `issuedAt` | issuance timestamp (UTC ISO) |
-| `subject` | audited schemas and scope (`catalog` or `schema-file`) |
+| `subject` | audited schemas and scope (`catalog`, `schema-file`, or `shadow`) |
 | `score` | deterministic RLS Score and band |
 | `coverage.complete` | false when offline parsing left statements unevaluated |
 | `coverage.limitations` | exactly what was not evaluated |
 | `findings.total` / `bySeverity` | counts only — never policy text |
 | `findings.fingerprints` | stable finding fingerprints, sorted |
+| `shadow` | present when the audit ran in a disposable world |
 | `digest` | SHA-256 over the canonical JSON body |
 | `signature` | optional Ed25519 signature + public key |
 

@@ -36,6 +36,8 @@ export type {
   CoverageReceipt,
   ReceiptVerification
 } from "./receipts/receipt.js";
+export { compareShadowFindings, runShadow } from "./shadow/runner.js";
+export type { ShadowComparison, ShadowOptions, ShadowOutcome } from "./shadow/runner.js";
 export { renderExplainReport, renderTextReport } from "./reporters/text.js";
 export type {
   AuditOptions,
