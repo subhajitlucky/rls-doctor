@@ -35,7 +35,8 @@ const IGNORED_STATEMENT = new RegExp(
   "^(?:" +
     "create\\s+or\\s+replace\\s+(?:function|procedure|view|trigger)|" +
     "create\\s+(?:extension|function|procedure|index|unique\\s+index|view|materialized\\s+view|sequence|type|domain|trigger|publication|subscription|collation)|" +
-    "alter\\s+(?:extension|function|procedure|index|sequence|type|domain|trigger|publication|subscription)|" +
+    "alter\\s+(?:extension|function|procedure|index|sequence|type|domain|trigger|publication|subscription|table\\s)|" +
+    "drop\\s+(?:trigger|function|index|view|materialized\\s+view|type|domain|sequence|extension|publication|subscription)\\b|" +
     "comment\\s+on|set\\s|reset\\s|select\\s|insert\\s|update\\s|delete\\s|begin\\b|commit\\b|rollback\\b|start\\s+transaction|analyze\\b|vacuum\\b|listen\\b|notify\\b|grant\\s+execute|revoke\\s+execute" +
   ")",
   "i"
