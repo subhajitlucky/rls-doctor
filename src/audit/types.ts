@@ -145,12 +145,14 @@ export interface AuditReport {
   schemaFindings: SchemaFinding[];
   tables: TableAudit[];
   baseline?: BaselineSummary;
+  limitations?: string[];
 }
 
 export interface AuditOptions {
   schemas: string[];
   generatedAt?: Date;
   appRoles?: readonly string[];
+  limitations?: readonly string[];
 }
 
 export type ProbeStatus = "rows" | "none" | "denied" | "error";

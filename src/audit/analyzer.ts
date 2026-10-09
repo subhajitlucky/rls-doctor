@@ -90,12 +90,14 @@ export function analyzeCatalog(snapshot: CatalogSnapshot, options: AuditOptions)
     )
     .sort((a, b) => `${a.schema}.${a.table}`.localeCompare(`${b.schema}.${b.table}`));
 
+  const limitations = [...(options.limitations ?? [])];
   return {
     schemaVersion: "1.0",
     generatedAt: generatedAt.toISOString(),
     schemas: options.schemas,
     summary: summarize(tables, schemaFindings, snapshot.policies.length),
-    score: scoreAudit(schemaFindings, tables),
+    score: scoreAudit(schemaFindings, tables, limitations.length === 0),
+    ...(limitations.length === 0 ? {} : { limitations }),
     schemaFindings,
     tables
   };

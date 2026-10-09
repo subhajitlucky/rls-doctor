@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
 import { loadBaseline } from "./audit/baseline.js";
 import { compareWithBaseline } from "./audit/fingerprint.js";
 import { analyzeProbeResults, shouldFailProbe } from "./audit/probe.js";
-import type { Severity } from "./audit/types.js";
+import { parseSchemaSql } from "./audit/schema-file.js";
+import type { AuditReport, Severity } from "./audit/types.js";
 import { formatCliError, resolveConnectionString } from "./cli-support.js";
 import { loadCatalog } from "./db/catalog.js";
 import { runProbes } from "./db/probe.js";
@@ -36,6 +37,7 @@ program
   .option("--format <format>", "Output format: text, json, or sarif.")
   .option("--baseline <path>", "Compare findings with a prior JSON report; only new findings can fail the run.")
   .option("--update-baseline", "Write the current report to the --baseline path and exit 0.", false)
+  .option("--schema-file <path>", "Audit a SQL schema or migration file offline; no database connection is used.")
   .option("--score", "Print only the RLS Score, for example RLS Score: 34/100.", false)
   .option("--badge", "Print a shields.io badge URL for the RLS Score.", false)
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
@@ -47,16 +49,11 @@ program
     let connectionString: string | undefined;
 
     try {
-      connectionString = resolveConnectionString(options.connection);
       const schemas = normalizeSchemas(options.schema);
       const failOn = normalizeFailOn(options.failOn);
       const format = parseFormat(options);
-      const statementTimeoutMs = Number(options.statementTimeout);
       const appRoles = normalizeAppRoles(options.appRoles);
 
-      if (!Number.isFinite(statementTimeoutMs) || statementTimeoutMs <= 0) {
-        throw new Error("--statement-timeout must be a positive number.");
-      }
       if (options.updateBaseline === true && options.baseline === undefined) {
         throw new Error("--update-baseline requires --baseline <path>.");
       }
@@ -66,17 +63,38 @@ program
           ? undefined
           : await loadBaseline(options.baseline);
 
-      const snapshot = await loadCatalog({
-        connectionString,
-        schemas,
-        statementTimeoutMs,
-        ...(appRoles.length > 0 ? { appRoles } : {})
-      });
+      let report: AuditReport;
 
-      const report = analyzeCatalog(snapshot, {
-        schemas,
-        ...(appRoles.length > 0 ? { appRoles } : {})
-      });
+      if (options.schemaFile !== undefined) {
+        if (options.connection !== undefined) {
+          throw new Error("--schema-file and --connection cannot be combined.");
+        }
+        const sql = await readFile(options.schemaFile, "utf8");
+        const parsed = parseSchemaSql(sql);
+        report = analyzeCatalog(parsed.snapshot, {
+          schemas: parsed.schemas,
+          ...(appRoles.length > 0 ? { appRoles } : {}),
+          limitations: parsed.limitations
+        });
+      } else {
+        connectionString = resolveConnectionString(options.connection);
+        const statementTimeoutMs = Number(options.statementTimeout);
+        if (!Number.isFinite(statementTimeoutMs) || statementTimeoutMs <= 0) {
+          throw new Error("--statement-timeout must be a positive number.");
+        }
+
+        const snapshot = await loadCatalog({
+          connectionString,
+          schemas,
+          statementTimeoutMs,
+          ...(appRoles.length > 0 ? { appRoles } : {})
+        });
+
+        report = analyzeCatalog(snapshot, {
+          schemas,
+          ...(appRoles.length > 0 ? { appRoles } : {})
+        });
+      }
 
       if (baseline !== undefined) {
         const comparison = compareWithBaseline(baseline.fingerprints, report);
@@ -269,6 +287,7 @@ interface CheckOptions {
   format?: string;
   baseline?: string;
   updateBaseline?: boolean;
+  schemaFile?: string;
   score?: boolean;
   badge?: boolean;
 }

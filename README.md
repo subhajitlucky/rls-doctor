@@ -97,6 +97,7 @@ rls-doctor probe --app-roles authenticated --owner-columns tenant_id
 --fail-on <severity>         info, low, medium, high, critical, none. Default: high
 --baseline <path>            Compare with a prior JSON report; only new findings fail
 --update-baseline            Write the current report to --baseline and exit 0
+--schema-file <path>         Audit a SQL schema or migration file offline; no database
 --score                      Print only the RLS Score
 --badge                      Print a shields.io badge URL for the RLS Score
 --statement-timeout <ms>     Catalog query timeout. Default: 10000
@@ -213,6 +214,22 @@ rls-doctor check --badge    # https://img.shields.io/badge/RLS%20Score-34%2F100-
 `--score` and `--badge` print only the score or badge; exit codes still follow
 `--fail-on`. JSON reports always include the `score` object with its
 `findingPenalty` breakdown.
+
+## Audit migrations without a database
+
+`check --schema-file` reconstructs table, policy, RLS, grant, role, and
+default-privilege state from a SQL file — no connection, no credentials.
+Unsupported statements become coverage limitations instead of guessed
+findings, and the RLS Score carries the offline coverage penalty.
+
+```bash
+rls-doctor check --schema-file supabase/migrations/0001_init.sql --fail-on high
+```
+
+Supported: `CREATE SCHEMA/TABLE/ROLE/USER/POLICY`, `ALTER TABLE` RLS and
+`FORCE ROW LEVEL SECURITY`, `GRANT`/`REVOKE` on tables, schemas, and roles,
+`ALTER DEFAULT PRIVILEGES`, `DROP` of the same, and unconditional role
+creation inside `DO` blocks.
 
 ### Exit behavior
 

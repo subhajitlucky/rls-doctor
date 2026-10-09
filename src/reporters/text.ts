@@ -54,6 +54,14 @@ export function renderTextReport(report: AuditReport): string {
     lines.push("No tables found in the selected schemas.");
   }
 
+  const limitations = report.limitations ?? [];
+  if (limitations.length > 0) {
+    lines.push("", "Coverage limitations (offline schema file)");
+    for (const limitation of limitations) {
+      lines.push(`- ${limitation}`);
+    }
+  }
+
   return `${lines.join("\n")}\n`;
 }
 

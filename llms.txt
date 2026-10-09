@@ -4,7 +4,7 @@ Don't trust your RLS. Prove it. Read-only Postgres and Supabase Row Level Securi
 
 ## What it does
 
-Reads catalog metadata and reports RLS risks: disabled RLS on granted tables, unconditional `using (true)` policies, missing `WITH CHECK`, reachable `TRUNCATE`, disabled `FORCE ROW LEVEL SECURITY`, and broad default privileges. `probe` impersonates application roles in a rolled-back read-only transaction and shows which rows they can actually read. Every report carries a deterministic RLS Score (`--score`, `--badge`).
+Reads catalog metadata and reports RLS risks: disabled RLS on granted tables, unconditional `using (true)` policies, missing `WITH CHECK`, reachable `TRUNCATE`, disabled `FORCE ROW LEVEL SECURITY`, and broad default privileges. `probe` impersonates application roles in a rolled-back read-only transaction and shows which rows they can actually read. `check --schema-file <path>` audits a SQL migration offline with no database. Every report carries a deterministic RLS Score (`--score`, `--badge`).
 
 ## Install
 

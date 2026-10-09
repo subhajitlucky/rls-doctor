@@ -1,6 +1,8 @@
 export { analyzeCatalog, getTableAudit, shouldFail } from "./audit/analyzer.js";
 export type { FailOptions } from "./audit/analyzer.js";
 export { bandForScore, scoreAudit, SEVERITY_PENALTIES } from "./audit/score.js";
+export { parseSchemaSql } from "./audit/schema-file.js";
+export type { ParsedSchemaFile } from "./audit/schema-file.js";
 export { isAuditReport, loadBaseline } from "./audit/baseline.js";
 export type { AuditBaseline } from "./audit/baseline.js";
 export {
