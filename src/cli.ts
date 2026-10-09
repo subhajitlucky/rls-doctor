@@ -236,6 +236,20 @@ program
   });
 
 program
+  .command("demo")
+  .description("Start a disposable PostgreSQL, prove a cross-tenant leak, and clean up. No configuration needed.")
+  .action(async () => {
+    try {
+      const { runDemo } = await import("./demo/runner.js");
+      const outcome = await runDemo();
+      process.stdout.write(outcome.output);
+    } catch (error) {
+      process.stderr.write(`rls-doctor: ${formatCliError(error)}\n`);
+      process.exitCode = 2;
+    }
+  });
+
+program
   .command("mcp")
   .description("Serve read-only RLS audits over the Model Context Protocol on stdio.")
   .action(async () => {

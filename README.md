@@ -14,6 +14,7 @@ Can user A read user B's rows? Row Level Security is one of Postgres's strongest
 
 ```bash
 npx rls-doctor check    # reads DATABASE_URL or SUPABASE_DB_URL
+npx rls-doctor demo     # no database needed: disposable Postgres, proven leak
 ```
 
 ```txt
@@ -77,6 +78,7 @@ Requires Node.js 20 or later. Prefer `DATABASE_URL` or `SUPABASE_DB_URL` with re
 | `check` | Audit one or more schemas |
 | `explain <table>` | Full detail on a single table |
 | `probe` | Impersonate app roles and prove actual row access |
+| `demo` | Spin up a disposable Postgres and prove a cross-tenant leak |
 | `mcp` | Serve read-only MCP tools over stdio |
 
 ```bash
@@ -240,9 +242,14 @@ Teaches compatible coding agents when to run the audit, how to use read-only dat
 
 `rls-doctor` audits catalog-visible PostgreSQL RLS, grants, and role paths. It does not audit hosted Supabase management settings, views, or functions — review Data API configuration separately. See [`docs/guides/supabase-rls-patterns.md`](docs/guides/supabase-rls-patterns.md) for unsafe vs. safer policy examples.
 
-## Try it without a database
+## Try it in seconds
 
-`demo/` holds disposable fixtures — `unsafe-schema.sql` (intentionally risky policies) and `safe-schema.sql` (a safer reference shape).
+`npx rls-doctor demo` starts a disposable PostgreSQL container, applies an
+intentionally unsafe schema, runs `check` and `probe`, proves a cross-tenant
+read, and removes the container. No configuration, no credentials, nothing
+written — and when Docker is unavailable it falls back to a recorded run.
+
+`demo/` also holds disposable fixtures — `unsafe-schema.sql` (intentionally risky policies) and `safe-schema.sql` (a safer reference shape).
 
 ```bash
 npm run demo   # prints local demo steps

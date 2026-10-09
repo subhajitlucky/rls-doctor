@@ -18,6 +18,7 @@ npx rls-doctor check
 rls-doctor check                                    # catalog audit
 rls-doctor explain public.profiles                  # one table
 rls-doctor probe --app-roles authenticated          # behavioral proof
+rls-doctor demo                                     # disposable Postgres, proven leak
 ```
 
 ## What it does not do
