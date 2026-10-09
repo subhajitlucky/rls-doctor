@@ -32,7 +32,7 @@ Catalog analysis cannot prove runtime authz. Probe results depend on seeded data
 ## For agents
 
 - Skill: `.claude/skills/rls-doctor/SKILL.md` (also `.agents/skills/`)
-- MCP: `claude mcp add rls-doctor -- npx -y rls-doctor mcp`
+- MCP: `claude mcp add rls-doctor -- npx -y rls-doctor mcp` (tools: `check_rls`, `probe_access`, `explain_table`, `prove_isolation`, `propose_repair`)
 
 ## Docs
 

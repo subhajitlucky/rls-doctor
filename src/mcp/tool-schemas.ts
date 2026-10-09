@@ -3,6 +3,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const CHECK_TOOL_NAME = "check_rls";
 export const PROBE_TOOL_NAME = "probe_access";
 export const EXPLAIN_TOOL_NAME = "explain_table";
+export const PROVE_TOOL_NAME = "prove_isolation";
+export const REPAIR_TOOL_NAME = "propose_repair";
 
 export const MAX_TOOL_PAYLOAD_BYTES = 48 * 1024;
 
@@ -140,6 +142,62 @@ export const TOOL_DEFINITIONS: readonly Tool[] = [
       required: ["table"],
     },
   },
+  {
+    name: PROVE_TOOL_NAME,
+    description:
+      "Prove row-isolation claims offline from SQL schema or migration files, with no " +
+      "database connection: for each table, command, and role it returns proved " +
+      "(with the ownership column), witness (with the reason), or undecided (outside " +
+      "the sound decidable fragment). Read-only and offline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        schemaFiles: {
+          type: "array",
+          items: { type: "string" },
+          description: "SQL schema or migration files to prove, in order.",
+        },
+        roles: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Application roles to prove isolation for. Defaults to ["authenticated"].',
+        },
+        table: {
+          type: "string",
+          description: "Optional table filter, schema-qualified (public.orders) or bare (orders).",
+        },
+      },
+      required: ["schemaFiles"],
+    },
+  },
+  {
+    name: REPAIR_TOOL_NAME,
+    description:
+      "Generate a canonical repair for an RLS-disabled table and verify it statically " +
+      "before returning it: the patch is only included when every target witness flips " +
+      "to proved and no new medium+ finding appears. Read-only: never writes files and " +
+      "never applies anything; the CLI `fix` command adds live shadow verification.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        schemaFiles: {
+          type: "array",
+          items: { type: "string" },
+          description: "SQL schema or migration files to repair, in order.",
+        },
+        table: {
+          type: "string",
+          description: "Table to repair, schema-qualified (public.orders) or bare (orders).",
+        },
+        roles: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Application roles the ownership policy applies to. Defaults to ["authenticated"].',
+        },
+      },
+      required: ["schemaFiles", "table"],
+    },
+  },
 ];
 
 export function cutUtf8Safe(text: string, maxBytes: number): string {
@@ -154,6 +212,59 @@ export function cutUtf8Safe(text: string, maxBytes: number): string {
 export function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+export interface ProveToolArgs {
+  schemaFiles: string[];
+  roles: string[];
+  table?: string;
+}
+
+export interface RepairToolArgs {
+  schemaFiles: string[];
+  table: string;
+  roles: string[];
+}
+
+function requiredStringArray(value: unknown, field: string): string[] {
+  const items = parseStringArray(value);
+  if (items.length === 0) {
+    throw new Error(`"${field}" is required and must contain at least one path.`);
+  }
+  return items;
+}
+
+export function parseProveToolArgs(input: unknown): ProveToolArgs {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("prove_isolation arguments must be a JSON object.");
+  }
+  const args = input as Record<string, unknown>;
+  const roles = parseStringArray(args.roles);
+  const table = typeof args.table === "string" && args.table.trim().length > 0
+    ? args.table.trim()
+    : undefined;
+  return {
+    schemaFiles: requiredStringArray(args.schemaFiles, "schemaFiles"),
+    roles: roles.length > 0 ? roles : ["authenticated"],
+    ...(table === undefined ? {} : { table }),
+  };
+}
+
+export function parseRepairToolArgs(input: unknown): RepairToolArgs {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("propose_repair arguments must be a JSON object.");
+  }
+  const args = input as Record<string, unknown>;
+  const table = typeof args.table === "string" ? args.table.trim() : "";
+  if (table.length === 0) {
+    throw new Error('"table" is required for propose_repair.');
+  }
+  const roles = parseStringArray(args.roles);
+  return {
+    schemaFiles: requiredStringArray(args.schemaFiles, "schemaFiles"),
+    table,
+    roles: roles.length > 0 ? roles : ["authenticated"],
+  };
 }
 
 export function parseFormat(value: unknown): ToolFormat {

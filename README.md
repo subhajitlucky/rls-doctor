@@ -329,7 +329,7 @@ credentials. See [docs/receipts.md](docs/receipts.md).
 claude mcp add rls-doctor -- npx -y rls-doctor mcp
 ```
 
-Read-only tools: `check_rls`, `probe_access`, `explain_table`.
+Read-only tools: `check_rls`, `probe_access`, `explain_table`, `prove_isolation` (offline proofs from SQL files), `propose_repair` (statically verified repair proposals; never writes files).
 
 ## Agent skill
 

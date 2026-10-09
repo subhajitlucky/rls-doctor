@@ -1,9 +1,15 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { readFile } from "node:fs/promises";
 import { analyzeCatalog, getTableAudit } from "../audit/analyzer.js";
 import { analyzeProbeResults } from "../audit/probe.js";
+import { parseSchemaSql } from "../audit/schema-file.js";
 import { formatCliError, resolveConnectionString } from "../cli-support.js";
 import { loadCatalog } from "../db/catalog.js";
 import { runProbes } from "../db/probe.js";
+import { buildProofArtifact, buildProofClaims } from "../proof/runner.js";
+import { planRepair, renderPatch } from "../repair/repair.js";
+import { verifyRepairStatic } from "../repair/verify.js";
+import { MCP_SERVER_VERSION } from "./server.js";
 import {
   renderProbeJsonReport,
   renderProbeTextReport,
@@ -18,12 +24,18 @@ import {
   EXPLAIN_TOOL_NAME,
   MAX_TOOL_PAYLOAD_BYTES,
   PROBE_TOOL_NAME,
+  PROVE_TOOL_NAME,
+  REPAIR_TOOL_NAME,
   cutUtf8Safe,
   parseFormat,
+  parseProveToolArgs,
+  parseRepairToolArgs,
   parseStringArray,
   type CheckToolArgs,
   type ExplainToolArgs,
   type ProbeToolArgs,
+  type ProveToolArgs,
+  type RepairToolArgs,
 } from "./tool-schemas.js";
 
 const DEFAULT_OWNER_COLUMNS = ["owner_id", "user_id", "tenant_id", "account_id"];
@@ -127,6 +139,64 @@ export async function handleExplainTable(args: ExplainToolArgs): Promise<CallToo
   }
 }
 
+export async function handleProveIsolation(args: ProveToolArgs): Promise<CallToolResult> {
+  try {
+    const contents = await Promise.all(args.schemaFiles.map((file) => readFile(file, "utf8")));
+    const parsed = parseSchemaSql(contents.join("\n"));
+    const wanted = args.table;
+    const tables = wanted === undefined
+      ? parsed.snapshot.tables
+      : parsed.snapshot.tables.filter((table) =>
+          wanted.includes(".") ? `${table.schema}.${table.name}` === wanted : table.name === wanted
+        );
+    const claims = buildProofClaims(tables, parsed.snapshot.policies, args.roles);
+    const artifact = buildProofArtifact(
+      claims,
+      { schemaFiles: args.schemaFiles, schemas: parsed.schemas, roles: args.roles },
+      parsed.limitations,
+      MCP_SERVER_VERSION,
+    );
+    return textResult(bound(`${JSON.stringify(artifact, null, 2)}\n`));
+  } catch (error) {
+    return errorToolResult(new Error(formatCliError(error)));
+  }
+}
+
+export async function handleProposeRepair(args: RepairToolArgs): Promise<CallToolResult> {
+  try {
+    const contents = await Promise.all(args.schemaFiles.map((file) => readFile(file, "utf8")));
+    const originalSql = contents.join("\n");
+    const parsed = parseSchemaSql(originalSql);
+    const table = parsed.snapshot.tables.find((entry) =>
+      args.table.includes(".") ? `${entry.schema}.${entry.name}` === args.table : entry.name === args.table
+    );
+    if (table === undefined) {
+      return errorToolResult(new Error(`Table not found in the schema files: ${args.table}`));
+    }
+    const plan = planRepair(table, args.roles);
+    if (plan === undefined) {
+      return textResult(`${JSON.stringify({
+        status: "not-applicable",
+        table: `${table.schema}.${table.name}`,
+        reason: "row level security is already enabled; no repair template applies",
+      }, null, 2)}\n`);
+    }
+    const verification = verifyRepairStatic(originalSql, plan, args.roles);
+    const payload = {
+      status: verification.status,
+      table: `${table.schema}.${table.name}`,
+      patch: verification.status === "verified" ? renderPatch(plan) : null,
+      verification,
+      note:
+        "Static verification only: the CLI `fix` command adds live shadow verification " +
+        "and writes the patch. Nothing was written and nothing was applied.",
+    };
+    return textResult(bound(`${JSON.stringify(payload, null, 2)}\n`));
+  } catch (error) {
+    return errorToolResult(new Error(formatCliError(error)));
+  }
+}
+
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown> | undefined,
@@ -140,6 +210,12 @@ export async function handleToolCall(
   }
   if (name === EXPLAIN_TOOL_NAME) {
     return handleExplainTable(payload as unknown as ExplainToolArgs);
+  }
+  if (name === PROVE_TOOL_NAME) {
+    return handleProveIsolation(parseProveToolArgs(payload));
+  }
+  if (name === REPAIR_TOOL_NAME) {
+    return handleProposeRepair(parseRepairToolArgs(payload));
   }
   return errorToolResult(new Error(`unknown tool: ${name}`));
 }

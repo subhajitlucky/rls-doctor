@@ -4,15 +4,19 @@ import {
   EXPLAIN_TOOL_NAME,
   MAX_TOOL_PAYLOAD_BYTES,
   PROBE_TOOL_NAME,
+  PROVE_TOOL_NAME,
+  REPAIR_TOOL_NAME,
   TOOL_DEFINITIONS,
   cutUtf8Safe,
 } from "../src/mcp/tool-schemas.js";
 import { errorToolResult, handleToolCall } from "../src/mcp/tools.js";
 
 describe("mcp tool schemas", () => {
-  it("advertises three read-only tools", () => {
+  it("advertises five read-only tools", () => {
     const names = TOOL_DEFINITIONS.map((tool) => tool.name).sort();
-    expect(names).toEqual([CHECK_TOOL_NAME, EXPLAIN_TOOL_NAME, PROBE_TOOL_NAME].sort());
+    expect(names).toEqual(
+      [CHECK_TOOL_NAME, EXPLAIN_TOOL_NAME, PROBE_TOOL_NAME, PROVE_TOOL_NAME, REPAIR_TOOL_NAME].sort(),
+    );
   });
 
   it("describes each tool as read-only", () => {
@@ -80,5 +84,42 @@ describe("errorToolResult", () => {
   it("wraps non-Error values", () => {
     const result = errorToolResult("boom");
     expect(result.isError).toBe(true);
+  });
+});
+
+describe("offline MCP tools", () => {
+  it("proves isolation claims from schema files", async () => {
+    const result = await handleToolCall(PROVE_TOOL_NAME, {
+      schemaFiles: ["demo/unsafe-schema.sql"],
+    });
+    const artifact = JSON.parse(
+      (result.content[0] as { text: string }).text,
+    ) as { claims: { status: string }[]; digest: { value: string } };
+
+    expect(artifact.claims.filter((claim) => claim.status === "witness")).toHaveLength(6);
+    expect(artifact.digest.value).toHaveLength(64);
+  });
+
+  it("proposes a statically verified repair and explains non-applicability", async () => {
+    const repaired = await handleToolCall(REPAIR_TOOL_NAME, {
+      schemaFiles: ["demo/unsafe-schema.sql"],
+      table: "orders",
+    });
+    const payload = JSON.parse(
+      (repaired.content[0] as { text: string }).text,
+    ) as { status: string; patch: string | null; verification: { resolved: string[] } };
+
+    expect(payload.status).toBe("verified");
+    expect(payload.patch).toContain("enable row level security");
+    expect(payload.verification.resolved).toHaveLength(4);
+
+    const notApplicable = await handleToolCall(REPAIR_TOOL_NAME, {
+      schemaFiles: ["demo/unsafe-schema.sql"],
+      table: "profiles",
+    });
+    const payload2 = JSON.parse(
+      (notApplicable.content[0] as { text: string }).text,
+    ) as { status: string };
+    expect(payload2.status).toBe("not-applicable");
   });
 });
