@@ -21,6 +21,7 @@ export interface TableSnapshot {
   forceRls: boolean;
   isPartitioned: boolean;
   estimatedRows: number | null;
+  columns?: string[];
 }
 
 export interface RelationPrivilegeSnapshot {

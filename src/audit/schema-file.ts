@@ -212,16 +212,20 @@ class SchemaFileState {
     }
 
     const table = new RegExp(
-      `^create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?${QUALIFIED}`,
+      `^create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?${QUALIFIED}\\s*\\(`,
       "i"
     ).exec(text);
     if (table !== null) {
       const schema = table[1] === undefined ? "public" : parseIdentifier(table[1]);
       const name = parseIdentifier(table[2]!);
       const snapshot = this.table(schema, name);
-      if (/\bpartition\s+by\b/iu.test(text)) {
-        this.tables.set(this.key(schema, name), { ...snapshot, isPartitioned: true });
-      }
+      const body = readParenthesized(text, table[0].length - 1);
+      const columns = body === null ? undefined : parseColumns(body);
+      this.tables.set(this.key(schema, name), {
+        ...snapshot,
+        ...(columns === undefined ? {} : { columns }),
+        ...(/\bpartition\s+by\b/iu.test(text) ? { isPartitioned: true } : {}),
+      });
       return true;
     }
 
@@ -308,8 +312,23 @@ class SchemaFileState {
       return true;
     }
 
-    const policyAlter = new RegExp(`^alter\\s+policy\\b`, "i").test(text);
-    if (policyAlter) {
+    const addColumn = new RegExp(
+      `^alter\\s+table\\s+(?:only\\s+)?${QUALIFIED}\\s+add\\s+(?:column\\s+)?(${IDENTIFIER})`,
+      "i"
+    ).exec(text);
+    if (addColumn !== null) {
+      const schema = addColumn[1] === undefined ? "public" : parseIdentifier(addColumn[1]);
+      const name = parseIdentifier(addColumn[2]!);
+      const column = parseIdentifier(addColumn[3]!);
+      const snapshot = this.table(schema, name);
+      this.tables.set(this.key(schema, name), {
+        ...snapshot,
+        columns: [...new Set([...(snapshot.columns ?? []), column])],
+      });
+      return true;
+    }
+
+    const policyAlter = new RegExp(`^alter\\s+policy\\b`, "i").test(text);    if (policyAlter) {
       this.addLimitation("ALTER POLICY statements were not evaluated offline.");
       return true;
     }
@@ -710,6 +729,66 @@ function splitList(value: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+const COLUMN_CONSTRAINT_PREFIXES = new Set([
+  "constraint",
+  "primary",
+  "foreign",
+  "unique",
+  "check",
+  "like",
+  "exclude",
+  "table",
+]);
+
+function parseColumns(body: string): string[] {
+  const columns: string[] = [];
+  for (const part of splitTopLevelCommas(body)) {
+    const match = new RegExp(`^(${IDENTIFIER})`, "u").exec(part.trim());
+    if (match === null) continue;
+    const name = parseIdentifier(match[1]!);
+    if (COLUMN_CONSTRAINT_PREFIXES.has(name)) continue;
+    if (!columns.includes(name)) columns.push(name);
+  }
+  return columns;
+}
+
+function splitTopLevelCommas(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let quote: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (quote !== null) {
+      current += char;
+      if (char === quote) {
+        if (value[index + 1] === quote) {
+          current += value[index + 1];
+          index += 1;
+          continue;
+        }
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim().length > 0) parts.push(current);
+  return parts.filter((part) => part.trim().length > 0);
 }
 
 function parsePrivilegeNames(value: string): string[] {

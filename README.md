@@ -80,6 +80,7 @@ Requires Node.js 20 or later. Prefer `DATABASE_URL` or `SUPABASE_DB_URL` with re
 | `probe` | Impersonate app roles and prove actual row access |
 | `shadow` | Replay migrations in a disposable Postgres and compare static vs live |
 | `prove` | Prove isolation claims offline: proofs, witnesses, or undecided |
+| `fix` | Generate a repair and verify it in shadow before writing it |
 | `demo` | Spin up a disposable Postgres and prove a cross-tenant leak |
 | `mcp` | Serve read-only MCP tools over stdio |
 
@@ -281,6 +282,23 @@ For each table, command, and role it returns one of:
 Exit `1` when any witness exists. `--proof <path>` writes a canonical JSON
 artifact with a SHA-256 digest over the claims. See
 [docs/proofs.md](docs/proofs.md).
+
+## Proof-carrying repairs
+
+`fix` generates a canonical repair for an exposed table and verifies it in
+shadow before writing anything:
+
+```bash
+rls-doctor fix --schema-file supabase/migrations/0001_init.sql \
+  --table public.orders --patch fix-orders.sql --receipt fix-orders.json
+```
+
+The patch is written **only if** verification proves it resolves the target
+witnesses and introduces no new medium+ findings — statically always, and
+against a live disposable PostgreSQL when Docker is available. The receipt
+binds the finding fingerprints to the exact patch hash and the before/after
+verdicts. The tool never applies the patch; a human or authorized agent does,
+then reruns `check` and `prove`. See [docs/repairs.md](docs/repairs.md).
 
 ### Exit behavior
 

@@ -19,6 +19,13 @@ import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 import { buildReceipt, serializeReceipt, verifyReceipt } from "./receipts/receipt.js";
 import { runShadow } from "./shadow/runner.js";
 import { buildProofArtifact, buildProofClaims, renderProofText } from "./proof/runner.js";
+import { planRepair, renderPatch } from "./repair/repair.js";
+import {
+  buildRepairReceipt,
+  renderRepairText,
+  verifyRepairLive,
+  verifyRepairStatic
+} from "./repair/verify.js";
 
 const program = new Command();
 const require = createRequire(import.meta.url);
@@ -400,6 +407,103 @@ program
   });
 
 program
+  .command("fix")
+  .description("Generate a repair for an RLS-disabled table and verify it in shadow before writing it.")
+  .option("--schema-file <path...>", "SQL schema or migration files to repair, in order.")
+  .option("--table <table>", "Table to repair (bare or schema-qualified).")
+  .option("--role <role...>", "Application roles the ownership policy applies to.", ["authenticated"])
+  .option("--patch <path>", "Write the verified patch SQL to this path.")
+  .option("--receipt <path>", "Write the repair receipt (patch hash + before/after verification).")
+  .option("--json", "Print the repair receipt as JSON.")
+  .action(async (options: FixCliOptions) => {
+    try {
+      const files = options.schemaFile ?? [];
+      if (files.length === 0) {
+        throw new Error("--schema-file is required for repairs.");
+      }
+      if (options.table === undefined) {
+        throw new Error("--table is required for repairs.");
+      }
+      if (options.patch === undefined) {
+        throw new Error("--patch is required so the verified patch has a destination.");
+      }
+      const contents = await Promise.all(files.map((file) => readFile(file, "utf8")));
+      const originalSql = contents.join("\n");
+      const parsed = parseSchemaSql(originalSql);
+      const wanted = options.table;
+      const table = parsed.snapshot.tables.find((entry) =>
+        wanted.includes(".") ? `${entry.schema}.${entry.name}` === wanted : entry.name === wanted
+      );
+      if (table === undefined) {
+        throw new Error(`Table not found in the schema files: ${wanted}`);
+      }
+      const roles = normalizeAppRoles(options.role);
+      if (roles.length === 0) {
+        throw new Error("--role requires at least one role.");
+      }
+
+      const plan = planRepair(table, roles);
+      if (plan === undefined) {
+        process.stdout.write(
+          `No repair template applies to ${table.schema}.${table.name}: row level security is already enabled.\n`,
+        );
+        return;
+      }
+
+      const staticVerification = verifyRepairStatic(originalSql, plan, roles);
+      const liveVerification = await verifyRepairLive(originalSql, plan, roles);
+      const verification = liveVerification === undefined
+        ? {
+            ...staticVerification,
+            limitations: [
+              ...staticVerification.limitations,
+              "Live shadow verification was skipped because Docker is unavailable; the verdict is static-only.",
+            ],
+          }
+        : {
+            ...liveVerification,
+            mode: "static+live" as const,
+            status: staticVerification.status === "verified" && liveVerification.status === "verified"
+              ? ("verified" as const)
+              : ("failed" as const),
+            reasons: [...new Set([...staticVerification.reasons, ...liveVerification.reasons])],
+          };
+
+      const patch = renderPatch(plan);
+      const receipt = buildRepairReceipt(
+        plan,
+        patch,
+        verification,
+        { schemaFiles: files, table: `${table.schema}.${table.name}`, roles },
+        packageJson.version
+      );
+
+      if (verification.status === "failed") {
+        process.stderr.write(`rls-doctor: repair verification failed for ${table.schema}.${table.name}:\n`);
+        for (const reason of verification.reasons) {
+          process.stderr.write(`rls-doctor: - ${reason}\n`);
+        }
+        process.stderr.write("rls-doctor: no patch was written; nothing was applied.\n");
+        process.exitCode = 1;
+        return;
+      }
+
+      await writeFile(options.patch, patch, "utf8");
+      process.stderr.write(`rls-doctor: verified patch written to ${options.patch}\n`);
+      if (options.receipt !== undefined) {
+        await writeFile(options.receipt, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+        process.stderr.write(`rls-doctor: repair receipt written to ${options.receipt}\n`);
+      }
+      process.stdout.write(
+        options.json ? `${JSON.stringify(receipt, null, 2)}\n` : renderRepairText(receipt)
+      );
+    } catch (error) {
+      process.stderr.write(`rls-doctor: ${formatCliError(error)}\n`);
+      process.exitCode = 2;
+    }
+  });
+
+program
   .command("mcp")
   .description("Serve read-only RLS audits over the Model Context Protocol on stdio.")
   .action(async () => {
@@ -460,6 +564,15 @@ interface ProveCliOptions {
   table?: string[];
   role?: string[];
   proof?: string;
+  json?: boolean;
+}
+
+interface FixCliOptions {
+  schemaFile?: string[];
+  table?: string;
+  role?: string[];
+  patch?: string;
+  receipt?: string;
   json?: boolean;
 }
 

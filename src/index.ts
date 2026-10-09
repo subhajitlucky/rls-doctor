@@ -42,6 +42,19 @@ export { buildProofArtifact, buildProofClaims, renderProofText } from "./proof/r
 export type { ClaimStatus, ProofArtifact, ProofClaim, ProofCommand, ProofReport } from "./proof/runner.js";
 export { decidePredicate } from "./proof/predicate.js";
 export type { Decision } from "./proof/predicate.js";
+export { ownerColumnFor, planRepair, renderPatch } from "./repair/repair.js";
+export type { RepairPlan } from "./repair/repair.js";
+export {
+  buildRepairReceipt,
+  renderRepairText,
+  verifyRepairLive,
+  verifyRepairStatic
+} from "./repair/verify.js";
+export type {
+  RepairReceipt,
+  RepairVerification,
+  RepairVerificationMode
+} from "./repair/verify.js";
 export { renderExplainReport, renderTextReport } from "./reporters/text.js";
 export type {
   AuditOptions,
