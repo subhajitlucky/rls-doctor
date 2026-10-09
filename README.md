@@ -142,6 +142,14 @@ Checks follow PostgreSQL command semantics: `SELECT` evaluates `USING`; `INSERT`
 
 It follows direct, inherited, and `SET ROLE` membership paths (including PostgreSQL 16 per-membership options; 15 is normalized), and reports current access separately from default privileges affecting future tables.
 
+## Ecosystem study
+
+We statically audited the migrations of 60 public Supabase projects: **63%
+contain at least one high or critical RLS pattern** (median score 38/100),
+with coverage limitations reported honestly in 57% of them. Aggregate,
+anonymized, reproducible — read the [report](docs/blog/2026-10-09-open-source-rls-audit.md)
+and the [disclosure policy](docs/disclosure-policy.md).
+
 ## GitHub Action
 
 Findings land in the Security tab.
