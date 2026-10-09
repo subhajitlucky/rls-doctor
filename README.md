@@ -98,6 +98,8 @@ rls-doctor probe --app-roles authenticated --owner-columns tenant_id
 --baseline <path>            Compare with a prior JSON report; only new findings fail
 --update-baseline            Write the current report to --baseline and exit 0
 --schema-file <path>         Audit a SQL schema or migration file offline; no database
+--receipt <path>             Write a portable coverage receipt (digest-verified)
+--receipt-key <path>         Sign the receipt with an Ed25519 private key (PEM)
 --score                      Print only the RLS Score
 --badge                      Print a shields.io badge URL for the RLS Score
 --statement-timeout <ms>     Catalog query timeout. Default: 10000
@@ -246,6 +248,21 @@ creation inside `DO` blocks.
 - `2` — caught runtime failure: missing credentials, connection/catalog error, invalid action value, requested table not found
 
 `--fail-on none` always disables finding-based failure. A clean report uses `highestSeverity: "none"`, so `--fail-on info` still exits `0` when there are no findings.
+
+## Coverage receipts
+
+Every audit can emit a portable **coverage receipt** — what was checked, what
+was not, the deterministic score, and finding fingerprints — with a SHA-256
+digest over the canonical body and an optional Ed25519 signature:
+
+```bash
+rls-doctor check --receipt receipt.json
+rls-doctor check --schema-file m.sql --receipt receipt.json --receipt-key key.pem
+rls-doctor verify-receipt receipt.json   # exit 0 valid, 2 tampered
+```
+
+Receipts never contain policy expressions, connection strings, or
+credentials. See [docs/receipts.md](docs/receipts.md).
 
 ## MCP server
 

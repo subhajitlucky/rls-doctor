@@ -23,6 +23,19 @@ export { renderSarifReport } from "./reporters/sarif.js";
 export type { SarifRenderOptions } from "./reporters/sarif.js";
 export { renderScoreLine, scoreBadgeUrl } from "./reporters/score.js";
 export type { ScoreRenderOptions } from "./reporters/score.js";
+export {
+  buildReceipt,
+  canonicalJson,
+  receiptDigest,
+  RECEIPT_VERSION,
+  serializeReceipt,
+  verifyReceipt
+} from "./receipts/receipt.js";
+export type {
+  BuildReceiptOptions,
+  CoverageReceipt,
+  ReceiptVerification
+} from "./receipts/receipt.js";
 export { renderExplainReport, renderTextReport } from "./reporters/text.js";
 export type {
   AuditOptions,

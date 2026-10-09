@@ -16,6 +16,7 @@ import { renderProbeJsonReport, renderProbeTextReport } from "./reporters/probe.
 import { renderSarifReport } from "./reporters/sarif.js";
 import { renderScoreOutput } from "./reporters/score.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
+import { buildReceipt, serializeReceipt, verifyReceipt } from "./receipts/receipt.js";
 
 const program = new Command();
 const require = createRequire(import.meta.url);
@@ -38,6 +39,8 @@ program
   .option("--baseline <path>", "Compare findings with a prior JSON report; only new findings can fail the run.")
   .option("--update-baseline", "Write the current report to the --baseline path and exit 0.", false)
   .option("--schema-file <path>", "Audit a SQL schema or migration file offline; no database connection is used.")
+  .option("--receipt <path>", "Write a portable coverage receipt to this path.")
+  .option("--receipt-key <path>", "Sign the receipt with an Ed25519 private key (PEM).")
   .option("--score", "Print only the RLS Score, for example RLS Score: 34/100.", false)
   .option("--badge", "Print a shields.io badge URL for the RLS Score.", false)
   .option("--statement-timeout <ms>", "Catalog query timeout in milliseconds.", "10000")
@@ -109,6 +112,18 @@ program
         await writeFile(options.baseline, renderJsonReport(report), "utf8");
         process.stderr.write(`rls-doctor: baseline updated at ${options.baseline}\n`);
         return;
+      }
+
+      if (options.receipt !== undefined) {
+        const privateKeyPem =
+          options.receiptKey === undefined ? undefined : await readFile(options.receiptKey, "utf8");
+        const receipt = buildReceipt(report, {
+          source: options.schemaFile === undefined ? "catalog" : "schema-file",
+          toolVersion: packageJson.version,
+          ...(privateKeyPem === undefined ? {} : { privateKeyPem })
+        });
+        await writeFile(options.receipt, serializeReceipt(receipt), "utf8");
+        process.stderr.write(`rls-doctor: receipt written to ${options.receipt}\n`);
       }
 
       const scoreOutput = renderScoreOutput(report, options);
@@ -268,6 +283,36 @@ program
   });
 
 program
+  .command("verify-receipt")
+  .argument("<file>", "Path to a receipt JSON file.")
+  .description("Verify a coverage receipt: digest integrity, optional signature, and coverage summary.")
+  .action(async (file: string) => {
+    try {
+      const text = await readFile(file, "utf8");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        process.stderr.write(`rls-doctor: ${file} is not valid JSON\n`);
+        process.exitCode = 2;
+        return;
+      }
+      const verification = verifyReceipt(parsed);
+      if (!verification.valid) {
+        for (const reason of verification.reasons) {
+          process.stderr.write(`rls-doctor: receipt invalid: ${reason}\n`);
+        }
+        process.exitCode = 2;
+        return;
+      }
+      process.stdout.write(verification.summary);
+    } catch (error) {
+      process.stderr.write(`rls-doctor: ${formatCliError(error)}\n`);
+      process.exitCode = 2;
+    }
+  });
+
+program
   .command("mcp")
   .description("Serve read-only RLS audits over the Model Context Protocol on stdio.")
   .action(async () => {
@@ -288,6 +333,8 @@ interface CheckOptions {
   baseline?: string;
   updateBaseline?: boolean;
   schemaFile?: string;
+  receipt?: string;
+  receiptKey?: string;
   score?: boolean;
   badge?: boolean;
 }
