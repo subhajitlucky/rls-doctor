@@ -19,6 +19,7 @@
     "demo",
     "docs",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {

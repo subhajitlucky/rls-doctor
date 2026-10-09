@@ -299,6 +299,17 @@ It's a focused catalog audit, **not** a proof or compliance product. It does not
 
 It's a security review aid, not a replacement for application-level authorization tests, grant reviews, or a full production security audit.
 
+## Dogfooding
+
+CI checks the safe reference schema with RLS Doctor itself, offline:
+
+```bash
+rls-doctor check --schema-file demo/safe-schema.sql --fail-on high
+```
+
+The safe fixture must stay clean at high severity. The unsafe fixture is
+expected to fail — it powers `demo` and the test suite.
+
 ## Development
 
 ```bash

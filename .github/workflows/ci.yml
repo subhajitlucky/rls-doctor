@@ -41,6 +41,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Self-check safe schema
+        run: node dist/cli.js check --schema-file demo/safe-schema.sql --fail-on high
+
       - name: Audit dependencies
         run: npm audit --audit-level=low
 
