@@ -1,6 +1,6 @@
 {
   "name": "rls-doctor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Prove who can read your Postgres/Supabase rows — before an attacker does.",
   "type": "module",
   "homepage": "https://github.com/subhajitlucky/rls-doctor#readme",
