@@ -18,6 +18,7 @@ import { renderScoreOutput } from "./reporters/score.js";
 import { renderExplainReport, renderTextReport } from "./reporters/text.js";
 import { buildReceipt, serializeReceipt, verifyReceipt } from "./receipts/receipt.js";
 import { runShadow } from "./shadow/runner.js";
+import { buildProofArtifact, buildProofClaims, renderProofText } from "./proof/runner.js";
 
 const program = new Command();
 const require = createRequire(import.meta.url);
@@ -352,6 +353,53 @@ program
   });
 
 program
+  .command("prove")
+  .description("Prove row-isolation claims from a schema file: isolation proofs, witnesses, or undecided.")
+  .option("--schema-file <path...>", "SQL schema or migration files to prove, in order.")
+  .option("--table <table...>", "Only prove these tables (bare or schema-qualified names).")
+  .option("--role <role...>", "Application roles to prove isolation for.", ["authenticated"])
+  .option("--proof <path>", "Write the proof artifact (canonical JSON with a SHA-256 digest).")
+  .option("--json", "Print the proof artifact as JSON.")
+  .action(async (options: ProveCliOptions) => {
+    try {
+      const files = options.schemaFile ?? [];
+      if (files.length === 0) {
+        throw new Error("--schema-file is required for proof mode.");
+      }
+      const contents = await Promise.all(files.map((file) => readFile(file, "utf8")));
+      const parsed = parseSchemaSql(contents.join("\n"));
+      const roles = normalizeAppRoles(options.role);
+      if (roles.length === 0) {
+        throw new Error("--role requires at least one role.");
+      }
+      const wanted = new Set(options.table ?? []);
+      const tables = wanted.size === 0
+        ? parsed.snapshot.tables
+        : parsed.snapshot.tables.filter((table) =>
+            wanted.has(`${table.schema}.${table.name}`) || wanted.has(table.name)
+          );
+      const claims = buildProofClaims(tables, parsed.snapshot.policies, roles);
+      const artifact = buildProofArtifact(
+        claims,
+        { schemaFiles: files, schemas: parsed.schemas, roles },
+        parsed.limitations,
+        packageJson.version
+      );
+      if (options.proof !== undefined) {
+        await writeFile(options.proof, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+        process.stderr.write(`rls-doctor: proof artifact written to ${options.proof}\n`);
+      }
+      process.stdout.write(options.json ? `${JSON.stringify(artifact, null, 2)}\n` : renderProofText(artifact));
+      if (claims.some((claim) => claim.status === "witness")) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      process.stderr.write(`rls-doctor: ${formatCliError(error)}\n`);
+      process.exitCode = 2;
+    }
+  });
+
+program
   .command("mcp")
   .description("Serve read-only RLS audits over the Model Context Protocol on stdio.")
   .action(async () => {
@@ -405,6 +453,14 @@ interface ShadowCliOptions {
   failOn: string;
   receipt?: string;
   receiptKey?: string;
+}
+
+interface ProveCliOptions {
+  schemaFile?: string[];
+  table?: string[];
+  role?: string[];
+  proof?: string;
+  json?: boolean;
 }
 
 

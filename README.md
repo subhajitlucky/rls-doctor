@@ -79,6 +79,7 @@ Requires Node.js 20 or later. Prefer `DATABASE_URL` or `SUPABASE_DB_URL` with re
 | `explain <table>` | Full detail on a single table |
 | `probe` | Impersonate app roles and prove actual row access |
 | `shadow` | Replay migrations in a disposable Postgres and compare static vs live |
+| `prove` | Prove isolation claims offline: proofs, witnesses, or undecided |
 | `demo` | Spin up a disposable Postgres and prove a cross-tenant leak |
 | `mcp` | Serve read-only MCP tools over stdio |
 
@@ -258,6 +259,28 @@ rls-doctor shadow --schema-file supabase/migrations/*.sql --seed seed.sql --fail
 - The container is always removed; the audited database is never touched.
 - `--receipt` writes a receipt marked `scope=shadow` and
   `environment: shadow (disposable world)`.
+
+## Formal proof mode
+
+`prove` decides row-isolation claims from a schema file within a small,
+sound fragment — no database needed:
+
+```bash
+rls-doctor prove --schema-file supabase/migrations/0001_init.sql --table orders
+```
+
+For each table, command, and role it returns one of:
+
+- **proved** — every row the policies admit satisfies `owner_col = auth.uid()`
+  (or the policies admit no rows at all)
+- **witness** — the policies can admit rows outside the ownership boundary,
+  with the reason stated (`using (true)`, RLS disabled, mismatched columns)
+- **undecided** — outside the decidable fragment (NOT, subqueries, casts,
+  function calls); listed with the reason, never guessed
+
+Exit `1` when any witness exists. `--proof <path>` writes a canonical JSON
+artifact with a SHA-256 digest over the claims. See
+[docs/proofs.md](docs/proofs.md).
 
 ### Exit behavior
 

@@ -38,6 +38,10 @@ export type {
 } from "./receipts/receipt.js";
 export { compareShadowFindings, runShadow } from "./shadow/runner.js";
 export type { ShadowComparison, ShadowOptions, ShadowOutcome } from "./shadow/runner.js";
+export { buildProofArtifact, buildProofClaims, renderProofText } from "./proof/runner.js";
+export type { ClaimStatus, ProofArtifact, ProofClaim, ProofCommand, ProofReport } from "./proof/runner.js";
+export { decidePredicate } from "./proof/predicate.js";
+export type { Decision } from "./proof/predicate.js";
 export { renderExplainReport, renderTextReport } from "./reporters/text.js";
 export type {
   AuditOptions,
