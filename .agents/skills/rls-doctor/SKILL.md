@@ -102,7 +102,7 @@ annotated `readOnlyHint: true`, `destructiveHint: false`,
 - `prove_isolation` — offline proofs from SQL schema or migration files; no database
 - `propose_repair` — statically verified repair proposals; never writes files
 
-Register it with `claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.7 mcp`
+Register it with `claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.8 mcp`
 or the equivalent client config (Codex, Gemini, and generic stdio setups are
 in `docs/agents.md`). That registration is a separate, pinned, user-authorized
 install step, not the audit step. MCP failures return structured JSON shaped

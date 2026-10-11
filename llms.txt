@@ -32,7 +32,7 @@ Catalog analysis cannot prove runtime authz. Probe results depend on seeded data
 ## For agents
 
 - Skill: `.agents/skills/rls-doctor/SKILL.md` (also `.claude/skills/` after `npx skills add subhajitlucky/rls-doctor`)
-- MCP: `claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.7 mcp` — tools: `describe_capabilities`, `check_rls`, `probe_access`, `explain_table`, `prove_isolation`, `propose_repair` (all read-only, annotated)
+- MCP: `claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.8 mcp` — tools: `describe_capabilities`, `check_rls`, `probe_access`, `explain_table`, `prove_isolation`, `propose_repair` (all read-only, annotated)
 - MCP errors: `{ error: { code, message, nextAction } }` — branch on `code`, not prose
 - Exit codes: `0` clean, `1` findings at/above `--fail-on`, `2` operational failure (never clean)
 - Other clients (Codex CLI, Gemini CLI, generic stdio): https://github.com/subhajitlucky/rls-doctor/blob/main/docs/agents.md

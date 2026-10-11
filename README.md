@@ -326,7 +326,7 @@ credentials. See [docs/receipts.md](docs/receipts.md).
 ## MCP server
 
 ```bash
-claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.7 mcp
+claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.8 mcp
 ```
 
 Read-only tools, each annotated `readOnlyHint: true`, `destructiveHint: false`,

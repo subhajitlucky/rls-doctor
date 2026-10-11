@@ -9,13 +9,13 @@ user approval. Failures return
 `connection-required`, `connection-failed`, `invalid-arguments`,
 `not-found`, `internal-error`.
 
-Pin the version (`@0.5.7` below) to the release you audited; tool schemas
+Pin the version (`@0.5.8` below) to the release you audited; tool schemas
 move with server versions. `initialize` reports the exact server version.
 
 ## Claude Code
 
 ```bash
-claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.7 mcp
+claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.8 mcp
 ```
 
 Auto-approve the read-only tools in `.claude/settings.json`:
@@ -40,7 +40,7 @@ The agent skill is also installable: `npx skills add subhajitlucky/rls-doctor`.
 ## Codex CLI
 
 ```bash
-codex mcp add rls-doctor -- npx -y rls-doctor@0.5.7 mcp
+codex mcp add rls-doctor -- npx -y rls-doctor@0.5.8 mcp
 ```
 
 Equivalent `~/.codex/config.toml`:
@@ -48,7 +48,7 @@ Equivalent `~/.codex/config.toml`:
 ```toml
 [mcp_servers.rls-doctor]
 command = "npx"
-args = ["-y", "rls-doctor@0.5.7", "mcp"]
+args = ["-y", "rls-doctor@0.5.8", "mcp"]
 ```
 
 Codex reads [AGENTS.md](AGENTS.md) for repo context.
@@ -56,7 +56,7 @@ Codex reads [AGENTS.md](AGENTS.md) for repo context.
 ## Gemini CLI
 
 ```bash
-gemini mcp add rls-doctor npx -y rls-doctor@0.5.7 mcp
+gemini mcp add rls-doctor npx -y rls-doctor@0.5.8 mcp
 ```
 
 Equivalent `~/.gemini/settings.json`:
@@ -66,7 +66,7 @@ Equivalent `~/.gemini/settings.json`:
   "mcpServers": {
     "rls-doctor": {
       "command": "npx",
-      "args": ["-y", "rls-doctor@0.5.7", "mcp"]
+      "args": ["-y", "rls-doctor@0.5.8", "mcp"]
     }
   }
 }
@@ -84,7 +84,7 @@ Code-compatible harness — this config works as-is:
   "mcpServers": {
     "rls-doctor": {
       "command": "npx",
-      "args": ["-y", "rls-doctor@0.5.7", "mcp"]
+      "args": ["-y", "rls-doctor@0.5.8", "mcp"]
     }
   }
 }
