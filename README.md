@@ -326,10 +326,27 @@ credentials. See [docs/receipts.md](docs/receipts.md).
 ## MCP server
 
 ```bash
-claude mcp add rls-doctor -- npx -y rls-doctor mcp
+claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.7 mcp
 ```
 
-Read-only tools: `check_rls`, `probe_access`, `explain_table`, `prove_isolation` (offline proofs from SQL files), `propose_repair` (statically verified repair proposals; never writes files).
+Read-only tools, each annotated `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true`: `describe_capabilities` (tool contract, approval rules,
+coverage limits), `check_rls`, `probe_access`, `explain_table`,
+`prove_isolation` (offline proofs from SQL files), `propose_repair`
+(statically verified repair proposals; never writes files). Failures return
+structured JSON shaped as `{ error: { code, message, nextAction } }`. Setup
+for Codex CLI, Gemini CLI, and generic stdio clients is in
+[docs/agents.md](docs/agents.md).
+
+## Exit codes
+
+- `0`: the command completed and no finding met the `--fail-on` threshold.
+- `1`: the command completed and a finding met the threshold.
+- `2`: invalid input or an operational failure (connection, parse, IO).
+  Never treat exit `2` as clean.
+
+Commands document extra codes where they apply (for example
+`verify-receipt` exits `2` on a tampered receipt).
 
 ## Agent skill
 

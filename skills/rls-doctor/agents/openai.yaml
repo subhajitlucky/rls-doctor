@@ -1,0 +1,5 @@
+interface:
+  display_name: "RLS Doctor"
+  short_description: "Audit Postgres and Supabase RLS"
+  brand_color: "#0F766E"
+  default_prompt: "Use $rls-doctor to audit my Supabase Row Level Security policies and explain high-risk findings."

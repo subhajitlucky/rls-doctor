@@ -32,7 +32,20 @@ rls-doctor probe      # impersonate app roles, rolled back
 rls-doctor mcp        # serve read-only tools over stdio
 ```
 
-MCP tools: `check_rls`, `probe_access`, `explain_table`.
+MCP tools: `describe_capabilities` (call first — tool contract, approval
+rules, coverage limits), `check_rls`, `probe_access`, `explain_table`,
+`prove_isolation`, `propose_repair`. All are read-only and annotated
+(`readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`).
+MCP failures return `{ error: { code, message, nextAction } }`; branch on
+`code` (`connection-required`, `connection-failed`, `invalid-arguments`,
+`not-found`, `internal-error`) instead of parsing prose.
+
+## Exit codes
+
+- `0`: completed, no finding met `--fail-on`.
+- `1`: completed, a finding met `--fail-on`.
+- `2`: invalid input or operational failure (connection, parse, IO). Never
+  treat exit `2` as clean.
 
 ## Hard rules for agents
 
@@ -55,4 +68,5 @@ MCP tools: `check_rls`, `probe_access`, `explain_table`.
 ## Links
 
 - npm: https://www.npmjs.com/package/rls-doctor
+- Agent setup (Claude Code, Codex, Gemini, generic stdio): [docs/agents.md](docs/agents.md)
 - Post: https://subhajitpradhan.vercel.app/writing/five-postgres-rls-mistakes

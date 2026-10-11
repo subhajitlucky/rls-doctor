@@ -41,6 +41,12 @@ listings. Never print, echo, or expose a credential, connection string, or secre
 rls-doctor check --schema public
 ```
 
+Offline audit of a migration file, no database needed:
+
+```bash
+rls-doctor check --schema-file supabase/migrations/001_init.sql
+```
+
 For one table:
 
 ```bash
@@ -63,6 +69,7 @@ rls-doctor check --schema public --json --fail-on high
 ### Options
 
 - `--connection <url>` — explicit connection string (prefer env vars)
+- `--schema-file <path>` — audit a SQL schema or migration file offline; no database connection
 - `--schema <name...>` — schemas to audit or probe
 - `--json` — machine-readable output
 - `--format <text|json|sarif>` — report rendering (check)
@@ -83,16 +90,25 @@ rls-doctor check --schema public --json --fail-on high
 
 ## MCP
 
-If the MCP server is registered, prefer its tools over shell calls. All three
-are read-only against the target database and never mutate it:
+If the MCP server is registered, prefer its tools over shell calls. All six
+are read-only against the target database and never mutate it, and each is
+annotated `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true`:
 
+- `describe_capabilities` — call once first: tool contract, approval rules, coverage limits
 - `check_rls` — catalog posture for one or more schemas
 - `probe_access` — impersonate app roles in a rolled-back transaction
 - `explain_table` — one table's posture in detail
+- `prove_isolation` — offline proofs from SQL schema or migration files; no database
+- `propose_repair` — statically verified repair proposals; never writes files
 
-Register it with `claude mcp add rls-doctor -- npx -y rls-doctor mcp` or the
-equivalent client config. That registration is a separate, pinned,
-user-authorized install step, not the audit step.
+Register it with `claude mcp add rls-doctor --scope user -- npx -y rls-doctor@0.5.7 mcp`
+or the equivalent client config (Codex, Gemini, and generic stdio setups are
+in `docs/agents.md`). That registration is a separate, pinned, user-authorized
+install step, not the audit step. MCP failures return structured JSON shaped
+as `{ error: { code, message, nextAction } }`; branch on `code`
+(`connection-required`, `connection-failed`, `invalid-arguments`,
+`not-found`, `internal-error`) instead of parsing prose.
 
 ## Workflow
 
@@ -148,6 +164,7 @@ When deeper guidance is needed, read:
 
 - `docs/guides/supabase-rls-patterns.md`
 - `docs/guides/github-actions.md`
+- `docs/agents.md`
 - `llms.txt`
 - `AGENTS.md`
 - `README.md`

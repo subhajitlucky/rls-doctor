@@ -14,16 +14,19 @@
   "bin": {
     "rls-doctor": "dist/cli.js"
   },
+  "mcpName": "io.github.subhajitlucky/rls-doctor",
   "files": [
     "dist",
     "demo",
     "docs",
+    ".agents/skills/rls-doctor",
     "README.md",
     "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsup src/cli.ts src/index.ts --format esm --dts --clean",
+    "bundle": "npm run build && node scripts/build-mcpb.mjs",
     "check": "tsc --noEmit",
     "ci": "npm run check && npm test && npm run build && npm run test:cli-version && npm audit --audit-level=low",
     "ci:full": "npm run ci && npm run test:integration",
