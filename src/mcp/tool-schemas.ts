@@ -5,6 +5,18 @@ export const PROBE_TOOL_NAME = "probe_access";
 export const EXPLAIN_TOOL_NAME = "explain_table";
 export const PROVE_TOOL_NAME = "prove_isolation";
 export const REPAIR_TOOL_NAME = "propose_repair";
+export const DESCRIBE_TOOL_NAME = "describe_capabilities";
+
+/** House style for MCP tool annotations: every tool is read-only and retry-safe. */
+function readOnlyAnnotations(title: string, openWorldHint: boolean) {
+  return {
+    title,
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint,
+  };
+}
 
 export const MAX_TOOL_PAYLOAD_BYTES = 48 * 1024;
 
@@ -74,6 +86,7 @@ export const TOOL_DEFINITIONS: readonly Tool[] = [
         },
       },
     },
+    annotations: readOnlyAnnotations("Audit RLS posture", true),
   },
   {
     name: PROBE_TOOL_NAME,
@@ -118,6 +131,7 @@ export const TOOL_DEFINITIONS: readonly Tool[] = [
       },
       required: ["appRoles"],
     },
+    annotations: readOnlyAnnotations("Probe application role row access", true),
   },
   {
     name: EXPLAIN_TOOL_NAME,
@@ -141,6 +155,7 @@ export const TOOL_DEFINITIONS: readonly Tool[] = [
       },
       required: ["table"],
     },
+    annotations: readOnlyAnnotations("Explain one table's RLS posture", true),
   },
   {
     name: PROVE_TOOL_NAME,
@@ -169,6 +184,7 @@ export const TOOL_DEFINITIONS: readonly Tool[] = [
       },
       required: ["schemaFiles"],
     },
+    annotations: readOnlyAnnotations("Prove row isolation offline", false),
   },
   {
     name: REPAIR_TOOL_NAME,
@@ -197,6 +213,21 @@ export const TOOL_DEFINITIONS: readonly Tool[] = [
       },
       required: ["schemaFiles", "table"],
     },
+    annotations: readOnlyAnnotations("Propose a statically verified repair", false),
+  },
+  {
+    name: DESCRIBE_TOOL_NAME,
+    description:
+      "Describe this MCP server: available tools, which run offline versus against " +
+      "a live database, read-only guarantees, coverage limitations, and when user " +
+      "approval is required. Call this once before running other tools.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    annotations: readOnlyAnnotations("Describe rls-doctor capabilities", false),
   },
 ];
 

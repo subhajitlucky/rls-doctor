@@ -26,12 +26,15 @@ export const MCP_SERVER_VERSION = packageVersion();
 const SERVER_INSTRUCTIONS = [
   "RLS Doctor audits Postgres and Supabase Row Level Security and returns",
   "deterministic findings for coding agents.",
+  "Call describe_capabilities once to learn tool contracts, offline versus",
+  "live-database modes, coverage limitations, and approval rules.",
   "check_rls reads catalog metadata. probe_access impersonates application",
   "roles in a rolled-back read-only transaction. explain_table covers one table.",
   "prove_isolation and propose_repair work offline from SQL files and never",
   "connect to a database. Every tool is read-only against the target database",
   "and never mutates it. Ask the user before connecting to a live database.",
-  "Never print connection strings.",
+  "Never print connection strings. Failures return structured JSON shaped as",
+  "{ error: { code, message, nextAction } }.",
 ].join(" ");
 
 export function createMcpServer(): Server {

@@ -9,7 +9,7 @@ import { runProbes } from "../db/probe.js";
 import { buildProofArtifact, buildProofClaims } from "../proof/runner.js";
 import { planRepair, renderPatch } from "../repair/repair.js";
 import { verifyRepairStatic } from "../repair/verify.js";
-import { MCP_SERVER_VERSION } from "./server.js";
+import { MCP_SERVER_NAME, MCP_SERVER_VERSION } from "./server.js";
 import {
   renderProbeJsonReport,
   renderProbeTextReport,
@@ -21,11 +21,13 @@ import {
 } from "../reporters/text.js";
 import {
   CHECK_TOOL_NAME,
+  DESCRIBE_TOOL_NAME,
   EXPLAIN_TOOL_NAME,
   MAX_TOOL_PAYLOAD_BYTES,
   PROBE_TOOL_NAME,
   PROVE_TOOL_NAME,
   REPAIR_TOOL_NAME,
+  TOOL_DEFINITIONS,
   cutUtf8Safe,
   parseFormat,
   parseProveToolArgs,
@@ -44,12 +46,62 @@ function textResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
 }
 
-export function errorToolResult(error: unknown): CallToolResult {
-  const message = error instanceof Error ? error.message : String(error);
+export type ToolErrorCode =
+  | "connection-required"
+  | "connection-failed"
+  | "invalid-arguments"
+  | "not-found"
+  | "internal-error";
+
+const NEXT_ACTIONS: Record<ToolErrorCode, string> = {
+  "connection-required":
+    "Set DATABASE_URL or SUPABASE_DB_URL (prefer read-only credentials), or pass " +
+    "connectionString. Ask the user before connecting to a live database.",
+  "connection-failed":
+    "Verify the database is reachable, the credentials are valid and read-only, and " +
+    "the requested schemas exist. Never print the connection string.",
+  "invalid-arguments":
+    "Inspect the tool input schema and retry with the required arguments, or call " +
+    "describe_capabilities for the full contract.",
+  "not-found":
+    "Call check_rls to list audited tables, use a schema-qualified name, or verify " +
+    "the schema file paths exist.",
+  "internal-error":
+    "Retry once; if it persists, report the tool name and arguments (never the " +
+    "connection string) before trying a different approach.",
+};
+
+/** Structured, machine-branchable tool failure. Never echoes credentials. */
+export function toolError(code: ToolErrorCode, message: string): CallToolResult {
   return {
     isError: true,
-    content: [{ type: "text", text: `rls-doctor: ${message}` }],
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          { error: { code, message, nextAction: NEXT_ACTIONS[code] } },
+          null,
+          2,
+        ),
+      },
+    ],
   };
+}
+
+/** Map an unexpected failure to a structured error result. */
+export function errorToolResult(error: unknown): CallToolResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return toolError("internal-error", `rls-doctor: ${message}`);
+}
+
+function requireConnection(
+  value: string | undefined,
+): { connectionString: string } | { error: CallToolResult } {
+  try {
+    return { connectionString: resolveConnectionString(value) };
+  } catch (error) {
+    return { error: toolError("connection-required", formatCliError(error)) };
+  }
 }
 
 function bound(text: string): string {
@@ -57,9 +109,10 @@ function bound(text: string): string {
 }
 
 export async function handleCheckRls(args: CheckToolArgs): Promise<CallToolResult> {
-  let connectionString: string | undefined;
+  const connection = requireConnection(args.connectionString);
+  if ("error" in connection) return connection.error;
+  const { connectionString } = connection;
   try {
-    connectionString = resolveConnectionString(args.connectionString);
     const schemas = args.schemas && args.schemas.length > 0 ? args.schemas : ["public"];
     const appRoles = parseStringArray(args.appRoles);
 
@@ -78,21 +131,22 @@ export async function handleCheckRls(args: CheckToolArgs): Promise<CallToolResul
       : renderTextReport(report);
     return textResult(bound(rendered));
   } catch (error) {
-    return errorToolResult(new Error(formatCliError(error, connectionString)));
+    return toolError("connection-failed", formatCliError(error, connectionString));
   }
 }
 
 export async function handleProbeAccess(args: ProbeToolArgs): Promise<CallToolResult> {
-  let connectionString: string | undefined;
+  const connection = requireConnection(args.connectionString);
+  if ("error" in connection) return connection.error;
+  const { connectionString } = connection;
   try {
-    connectionString = resolveConnectionString(args.connectionString);
     const schemas = args.schemas && args.schemas.length > 0 ? args.schemas : ["public"];
     const appRoles = parseStringArray(args.appRoles);
     const subjects = parseStringArray(args.subjects);
     const ownerColumns = parseStringArray(args.ownerColumns);
 
     if (appRoles.length === 0) {
-      return errorToolResult(new Error("appRoles is required for probes."));
+      return toolError("invalid-arguments", "appRoles is required for probes.");
     }
 
     const run = await runProbes({
@@ -110,14 +164,15 @@ export async function handleProbeAccess(args: ProbeToolArgs): Promise<CallToolRe
       : renderProbeTextReport(report);
     return textResult(bound(rendered));
   } catch (error) {
-    return errorToolResult(new Error(formatCliError(error, connectionString)));
+    return toolError("connection-failed", formatCliError(error, connectionString));
   }
 }
 
 export async function handleExplainTable(args: ExplainToolArgs): Promise<CallToolResult> {
-  let connectionString: string | undefined;
+  const connection = requireConnection(args.connectionString);
+  if ("error" in connection) return connection.error;
+  const { connectionString } = connection;
   try {
-    connectionString = resolveConnectionString(args.connectionString);
     const tableRef = args.table.trim();
     const schema = tableRef.includes(".") ? tableRef.split(".")[0]! : "public";
 
@@ -129,13 +184,11 @@ export async function handleExplainTable(args: ExplainToolArgs): Promise<CallToo
     const report = analyzeCatalog(snapshot, { schemas: [schema] });
     const table = getTableAudit(report, tableRef);
     if (!table) {
-      return errorToolResult(
-        new Error(`Table not found in selected schemas: ${tableRef}`),
-      );
+      return toolError("not-found", `Table not found in selected schemas: ${tableRef}`);
     }
     return textResult(bound(renderExplainReport(table)));
   } catch (error) {
-    return errorToolResult(new Error(formatCliError(error, connectionString)));
+    return toolError("connection-failed", formatCliError(error, connectionString));
   }
 }
 
@@ -158,7 +211,7 @@ export async function handleProveIsolation(args: ProveToolArgs): Promise<CallToo
     );
     return textResult(bound(`${JSON.stringify(artifact, null, 2)}\n`));
   } catch (error) {
-    return errorToolResult(new Error(formatCliError(error)));
+    return fileError(error);
   }
 }
 
@@ -171,7 +224,7 @@ export async function handleProposeRepair(args: RepairToolArgs): Promise<CallToo
       args.table.includes(".") ? `${entry.schema}.${entry.name}` === args.table : entry.name === args.table
     );
     if (table === undefined) {
-      return errorToolResult(new Error(`Table not found in the schema files: ${args.table}`));
+      return toolError("not-found", `Table not found in the schema files: ${args.table}`);
     }
     const plan = planRepair(table, args.roles);
     if (plan === undefined) {
@@ -193,8 +246,60 @@ export async function handleProposeRepair(args: RepairToolArgs): Promise<CallToo
     };
     return textResult(bound(`${JSON.stringify(payload, null, 2)}\n`));
   } catch (error) {
-    return errorToolResult(new Error(formatCliError(error)));
+    return fileError(error);
   }
+}
+
+function fileError(error: unknown): CallToolResult {
+  const missing = (error as { code?: unknown } | null)?.code === "ENOENT";
+  return toolError(
+    missing ? "not-found" : "invalid-arguments",
+    formatCliError(error),
+  );
+}
+
+/** Describe the server contract so agents do not have to discover it by trial. */
+export function handleDescribeCapabilities(): CallToolResult {
+  return textResult(
+    `${JSON.stringify(
+      {
+        server: { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
+        transport: "stdio",
+        tools: TOOL_DEFINITIONS.map(({ name, description, annotations }) => ({
+          name,
+          description,
+          mode: name === CHECK_TOOL_NAME || name === PROBE_TOOL_NAME || name === EXPLAIN_TOOL_NAME
+            ? "live-database"
+            : "offline",
+          annotations,
+        })),
+        guarantees: [
+          "Every tool is read-only against the target database and never mutates it.",
+          "probe_access impersonates roles inside begin ... read only and always rolls back.",
+          "prove_isolation and propose_repair run fully offline from schema files.",
+          "propose_repair returns a patch only when static verification flips every witness to proved.",
+          "Errors are structured: { error: { code, message, nextAction } }.",
+        ],
+        requiresUserApproval: [
+          "Any live-database tool (check_rls, probe_access, explain_table) when a connection string is configured or provided: ask the user before connecting, and prefer read-only credentials.",
+        ],
+        coverageLimitations: [
+          "Catalog analysis cannot prove application-level authorization.",
+          "Offline parsing does not evaluate DO block logic or ALTER POLICY statements.",
+          "Probe evidence depends on seeded data; empty tables prove nothing.",
+          "Live catalog analysis covers only the selected schemas.",
+        ],
+        usage:
+          "Run check_rls after schema changes or before release; probe_access with " +
+          "appRoles and two or more subjects proves cross-tenant reads; " +
+          "prove_isolation and propose_repair work offline from migration files; " +
+          "explain_table covers one table in depth. A clean check under offline " +
+          "coverage limitations is not a full clean result.",
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 export async function handleToolCall(
@@ -217,5 +322,11 @@ export async function handleToolCall(
   if (name === REPAIR_TOOL_NAME) {
     return handleProposeRepair(parseRepairToolArgs(payload));
   }
-  return errorToolResult(new Error(`unknown tool: ${name}`));
+  if (name === DESCRIBE_TOOL_NAME) {
+    return handleDescribeCapabilities();
+  }
+  return toolError(
+    "invalid-arguments",
+    `Unknown tool "${name}". Available tools: ${TOOL_DEFINITIONS.map((tool) => tool.name).join(", ")}.`,
+  );
 }

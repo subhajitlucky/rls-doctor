@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CHECK_TOOL_NAME,
+  DESCRIBE_TOOL_NAME,
   EXPLAIN_TOOL_NAME,
   MAX_TOOL_PAYLOAD_BYTES,
   PROBE_TOOL_NAME,
@@ -12,10 +13,17 @@ import {
 import { errorToolResult, handleToolCall } from "../src/mcp/tools.js";
 
 describe("mcp tool schemas", () => {
-  it("advertises five read-only tools", () => {
+  it("advertises six read-only tools", () => {
     const names = TOOL_DEFINITIONS.map((tool) => tool.name).sort();
     expect(names).toEqual(
-      [CHECK_TOOL_NAME, EXPLAIN_TOOL_NAME, PROBE_TOOL_NAME, PROVE_TOOL_NAME, REPAIR_TOOL_NAME].sort(),
+      [
+        CHECK_TOOL_NAME,
+        DESCRIBE_TOOL_NAME,
+        EXPLAIN_TOOL_NAME,
+        PROBE_TOOL_NAME,
+        PROVE_TOOL_NAME,
+        REPAIR_TOOL_NAME,
+      ].sort(),
     );
   });
 
@@ -23,6 +31,16 @@ describe("mcp tool schemas", () => {
     for (const tool of TOOL_DEFINITIONS) {
       expect((tool.description ?? "").toLowerCase()).toContain("read-only");
       expect(tool.inputSchema).toBeDefined();
+    }
+  });
+
+  it("annotates every tool as read-only, non-destructive, and idempotent", () => {
+    for (const tool of TOOL_DEFINITIONS) {
+      expect(tool.annotations?.readOnlyHint).toBe(true);
+      expect(tool.annotations?.destructiveHint).toBe(false);
+      expect(tool.annotations?.idempotentHint).toBe(true);
+      expect(tool.annotations?.openWorldHint).toBeTypeOf("boolean");
+      expect((tool.annotations?.title ?? "").length).toBeGreaterThan(0);
     }
   });
 
@@ -56,17 +74,37 @@ describe("cutUtf8Safe", () => {
 });
 
 describe("handleToolCall", () => {
-  it("returns an error result for unknown tools", async () => {
+  const errorBody = (text: string) =>
+    JSON.parse(text) as { error: { code: string; message: string; nextAction: string } };
+
+  it("returns a structured invalid-arguments error for unknown tools", async () => {
     const result = await handleToolCall("not_a_tool", {});
     expect(result.isError).toBe(true);
+    const text = result.content[0]!;
+    const body = errorBody(text.type === "text" ? text.text : "");
+    expect(body.error.code).toBe("invalid-arguments");
+    expect(body.error.message).toContain("not_a_tool");
+    expect(body.error.nextAction.length).toBeGreaterThan(0);
   });
 
-  it("returns an error when probe_access has no appRoles", async () => {
+  it("returns invalid-arguments when probe_access has no appRoles", async () => {
     process.env.DATABASE_URL = "postgresql://user:pass@localhost:5432/test";
     const result = await handleToolCall(PROBE_TOOL_NAME, { appRoles: [] });
     expect(result.isError).toBe(true);
     const text = result.content[0]!;
-    expect(text.type === "text" ? text.text : "").toContain("appRoles");
+    const body = errorBody(text.type === "text" ? text.text : "");
+    expect(body.error.code).toBe("invalid-arguments");
+    expect(body.error.message).toContain("appRoles");
+  });
+
+  it("returns connection-required when no connection string is configured", async () => {
+    delete process.env.DATABASE_URL;
+    delete process.env.SUPABASE_DB_URL;
+    const result = await handleToolCall(CHECK_TOOL_NAME, {});
+    expect(result.isError).toBe(true);
+    const text = result.content[0]!;
+    const body = errorBody(text.type === "text" ? text.text : "");
+    expect(body.error.code).toBe("connection-required");
   });
 
   it("sanitizes connection failures without echoing credentials", async () => {
@@ -77,13 +115,37 @@ describe("handleToolCall", () => {
     const body = text.type === "text" ? text.text : "";
     expect(body).not.toContain("secret-pass");
     expect(body).not.toContain("secret-user");
+    expect(errorBody(body).error.code).toBe("connection-failed");
+  });
+
+  it("describes capabilities with the full tool contract", async () => {
+    const result = await handleToolCall(DESCRIBE_TOOL_NAME, {});
+    expect(result.isError).toBeUndefined();
+    const text = result.content[0]!;
+    const payload = JSON.parse(text.type === "text" ? text.text : "") as {
+      tools: { name: string; mode: string }[];
+      guarantees: string[];
+      requiresUserApproval: string[];
+      coverageLimitations: string[];
+    };
+    expect(payload.tools).toHaveLength(6);
+    expect(payload.tools.filter((tool) => tool.mode === "offline")).toHaveLength(3);
+    expect(payload.guarantees.length).toBeGreaterThan(0);
+    expect(payload.requiresUserApproval.length).toBeGreaterThan(0);
+    expect(payload.coverageLimitations.length).toBeGreaterThan(0);
   });
 });
 
 describe("errorToolResult", () => {
-  it("wraps non-Error values", () => {
+  it("wraps non-Error values in the structured envelope", () => {
     const result = errorToolResult("boom");
     expect(result.isError).toBe(true);
+    const text = result.content[0]!;
+    const body = JSON.parse(
+      text.type === "text" ? text.text : "",
+    ) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("internal-error");
+    expect(body.error.message).toContain("boom");
   });
 });
 
