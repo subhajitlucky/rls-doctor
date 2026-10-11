@@ -28,11 +28,11 @@ try {
   await admin.connect();
   adminConnected = true;
   for (const fixture of ["unsafe-schema.sql", "safe-schema.sql"]) await admin.query(await readFile(new URL(`../demo/${fixture}`, import.meta.url), "utf8"));
-  await admin.query(`create role ${quoteIdentifier(auditorRole)} login password '${password}'`);
+  await admin.query(sql`create role ${quoteIdentifier(auditorRole)} login password ${quoteLiteral(password)}`);
   auditorCreated = true;
   const database = (await admin.query("select current_database() as name")).rows[0].name;
-  await admin.query(`grant connect on database ${quoteIdentifier(database)} to ${quoteIdentifier(auditorRole)}`);
-  await admin.query(`grant authenticated to ${quoteIdentifier(auditorRole)}`);
+  await admin.query(sql`grant connect on database ${quoteIdentifier(database)} to ${quoteIdentifier(auditorRole)}`);
+  await admin.query(sql`grant authenticated to ${quoteIdentifier(auditorRole)}`);
   await admin.query(
     `insert into rls_doctor_demo.orders (owner_id, total_cents) values
        ('00000000-0000-0000-0000-000000000001', 100),
@@ -164,8 +164,8 @@ try {
   process.exitCode = 1;
 } finally {
   if (adminConnected && auditorCreated) {
-    await admin.query(`drop owned by ${quoteIdentifier(auditorRole)}`).catch(reportCleanupFailure);
-    await admin.query(`drop role ${quoteIdentifier(auditorRole)}`).catch(reportCleanupFailure);
+    await admin.query(sql`drop owned by ${quoteIdentifier(auditorRole)}`).catch(reportCleanupFailure);
+    await admin.query(sql`drop role ${quoteIdentifier(auditorRole)}`).catch(reportCleanupFailure);
   }
   await admin.end().catch(() => undefined);
 }
@@ -178,6 +178,8 @@ async function runCli(args) {
 }
 function withCredentials(value, user, pass) { const url = new URL(value); url.username = user; url.password = pass; return url.toString(); }
 function quoteIdentifier(value) { return `"${String(value).replaceAll('"', '""')}"`; }
+function quoteLiteral(value) { return `'${String(value).replaceAll("'", "''")}'`; }
+function sql(strings, ...values) { return strings.reduce((text, part, index) => text + part + (values[index] ?? ""), ""); }
 function assertFinding(report, expected) { const findings = [...(report.schemaFindings ?? []), ...report.tables.flatMap((table) => table.findings)]; assert(findings.some((finding) => Object.entries(expected).every(([key, value]) => finding[key] === value)), `Unsafe audit did not produce ${JSON.stringify(expected)}`); }
 function assertFact(values, predicate, label) { assert(values?.some(predicate), `Catalog did not expose ${label}`); }
 function assertEqual(actual, expected, label) { assert(actual === expected, `${label}: expected ${expected}, received ${actual}`); }
